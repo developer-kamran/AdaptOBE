@@ -4,5 +4,12 @@ sqlalchemy[asyncio]>=2.0
 asyncpg
 alembic
 pydantic-settings
+pydantic[email]
 python-dotenv
 pgvector
+python-jose[cryptography]
+bcrypt
+
+pytest
+pytest-asyncio
+httpx
