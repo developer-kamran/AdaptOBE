@@ -132,3 +132,43 @@ async def test_update_and_delete_program(client, make_user):
         f"/api/v1/admin/programs/{program_id}", headers=auth_header(admin)
     )
     assert get_resp.status_code == 404
+
+
+async def test_faculty_can_read_programs(client, make_user):
+    """Faculty don't manage programmes, but need to read them to create a course."""
+    admin = await make_user("admin.progread@adaptobe.edu", role=UserRole.admin)
+    faculty = await make_user("faculty.progread@adaptobe.edu", role=UserRole.faculty)
+    dept_id = await _create_department(client, admin, "PROGREAD")
+    create_resp = await client.post(
+        "/api/v1/admin/programs",
+        json={"dept_id": dept_id, "code": "BSXX-R", "name": "BS Testing", "total_semesters": 8},
+        headers=auth_header(admin),
+    )
+    program_id = create_resp.json()["id"]
+
+    list_resp = await client.get("/api/v1/admin/programs", headers=auth_header(faculty))
+    assert list_resp.status_code == 200
+
+    get_resp = await client.get(
+        f"/api/v1/admin/programs/{program_id}", headers=auth_header(faculty)
+    )
+    assert get_resp.status_code == 200
+
+
+async def test_students_cannot_read_programs(client, make_user):
+    student = await make_user("student.progread@adaptobe.edu", role=UserRole.student)
+    resp = await client.get("/api/v1/admin/programs", headers=auth_header(student))
+    assert resp.status_code == 403
+
+
+async def test_faculty_cannot_write_programs(client, make_user):
+    admin = await make_user("admin.progwrite@adaptobe.edu", role=UserRole.admin)
+    faculty = await make_user("faculty.progwrite@adaptobe.edu", role=UserRole.faculty)
+    dept_id = await _create_department(client, admin, "PROGWRITE")
+
+    resp = await client.post(
+        "/api/v1/admin/programs",
+        json={"dept_id": dept_id, "code": "BLOCKED", "name": "Blocked", "total_semesters": 8},
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 403

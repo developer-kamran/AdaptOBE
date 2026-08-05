@@ -2,13 +2,24 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.user import UserUpdate
 from app.services.exceptions import ConflictError, NotFoundError
 
 
 async def list_users(db: AsyncSession) -> list[User]:
     result = await db.execute(select(User).order_by(User.id))
+    return list(result.scalars().all())
+
+
+async def list_active_students(db: AsyncSession) -> list[User]:
+    """Faculty need this to pick students for enrollment, but the full user
+    directory (`list_users`) is admin-only -- this is a narrower, safe subset."""
+    result = await db.execute(
+        select(User)
+        .where(User.role == UserRole.student, User.is_active.is_(True))
+        .order_by(User.full_name)
+    )
     return list(result.scalars().all())
 
 

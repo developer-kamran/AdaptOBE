@@ -129,3 +129,34 @@ async def test_list_plos_filtered_by_program(client, make_user, make_plo, progra
     assert resp.status_code == 200
     assert all(p["program_id"] == program.id for p in resp.json())
     assert len(resp.json()) >= 1
+
+
+async def test_faculty_can_read_plos(client, faculty, make_plo):
+    """Faculty don't manage PLOs, but need to read them to confirm CLO-PLO mappings."""
+    plo = await make_plo("PLO-1", "Knowledge", "Apply engineering knowledge.")
+
+    list_resp = await client.get("/api/v1/admin/plos", headers=auth_header(faculty))
+    assert list_resp.status_code == 200
+
+    get_resp = await client.get(f"/api/v1/admin/plos/{plo.id}", headers=auth_header(faculty))
+    assert get_resp.status_code == 200
+
+
+async def test_students_cannot_read_plos(client, make_user):
+    student = await make_user("student.ploread@adaptobe.edu", role=UserRole.student)
+    resp = await client.get("/api/v1/admin/plos", headers=auth_header(student))
+    assert resp.status_code == 403
+
+
+async def test_faculty_cannot_write_plos(client, faculty, program):
+    resp = await client.post(
+        "/api/v1/admin/plos",
+        json={
+            "program_id": program.id,
+            "code": "PLO-X",
+            "title": "Blocked",
+            "description": "Faculty should not be able to create PLOs.",
+        },
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 403
