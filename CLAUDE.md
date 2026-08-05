@@ -3,6 +3,8 @@
 ## 1. Project Overview
 AdaptOBE is an Intelligent Outcome-Based Education (OBE) Attainment & Adaptive Learning Platform for academic institutions. It automates Course Learning Outcome (CLO) to Program Learning Outcome (PLO) mapping using NLP sentence embeddings, calculates direct attainment from assessment scores, and applies machine learning (XGBoost + SHAP) for student risk prediction.
 
+This deployment targets a single department with four fixed degree programmes and ten standard PLOs — see **Section 11: Institutional Context** for the canonical values and how to seed them.
+
 ---
 
 ## 2. Technology Stack & Environment
@@ -28,10 +30,11 @@ AdaptOBE is an Intelligent Outcome-Based Education (OBE) Attainment & Adaptive L
     /routers       (FastAPI route handlers, one file per resource)
     /services      (business logic — attainment calc, mapping, etc.)
     /ml            (embedding generation, XGBoost training/inference, SHAP)
-    /core          (config, security/JWT, dependencies)
+    /core          (config, security/JWT, dependencies, institutional constants)
     main.py
   /alembic
     /versions
+  /scripts         (operational seed scripts — bootstrap admin, UBIT reference data)
   /tests
   .env             (gitignored — never committed)
   .env.example     (committed — documents required vars, no real values)
@@ -66,6 +69,8 @@ Keep business logic (attainment math, ML calls) out of routers — routers shoul
 * **Run Migrations:** `alembic upgrade head`
 * **Create Migration:** `alembic revision --autogenerate -m "description"`
 * **Run Backend Tests:** `pytest -v`
+* **Seed Institutional Data:** `python scripts/seed_ubit_data.py` (department, 4 programmes, 40 PLOs with embeddings — idempotent)
+* **Bootstrap First Admin:** `python scripts/seed_admin.py --email <email> --password <pw> --full-name "<name>"` (needed because `/auth/register` is admin-only)
 
 ### Frontend Commands (React / JavaScript)
 * **Start Dev Server:** `npm run dev`
@@ -93,7 +98,7 @@ Ensure the `pgvector` extension is enabled (`CREATE EXTENSION IF NOT EXISTS vect
 ### Core Relational & Vector Tables
 * `users`: `id (PK)`, `email (UNIQUE)`, `password_hash`, `full_name`, `role (ENUM: admin, faculty, student)`, `enrollment_no (UNIQUE, nullable)`, `seat_no (UNIQUE, nullable)`, `is_active`
 * `departments`: `id (PK)`, `name`, `code (UNIQUE)`
-* `programs`: `id (PK)`, `dept_id (FK)`, `name`, `total_semesters`
+* `programs`: `id (PK)`, `dept_id (FK)`, `code (UNIQUE, e.g. BSSE)`, `name`, `total_semesters`
 * `plos`: `id (PK)`, `program_id (FK)`, `code (e.g., PLO-1)`, `title`, `description`, `domain`, `embedding vector(384)`
 * `courses`: `id (PK)`, `program_id (FK)`, `owner_faculty_id (FK)`, `code (UNIQUE)`, `name`, `credit_hours`, `semester`
 * `clos`: `id (PK)`, `course_id (FK)`, `code (e.g., CLO-1)`, `title`, `description`, `bloom_level`, `embedding vector(384)`
@@ -242,3 +247,57 @@ Store and return explainability payloads in `student_predictions.shap_explanatio
 ### Module 7: Production Containerization & Deployment (Final Phase)
 * Create optimized Dockerfile for Python/FastAPI backend and React frontend.
 * Write production `docker-compose.yml` bundling FastAPI, PostgreSQL (with pgvector), and frontend static serving.
+
+---
+
+## 11. Institutional Context (UBIT Deployment)
+
+These values are fixed for this deployment. They live in code as constants in **`backend/app/core/institution.py`** — that module is the single source of truth. Do not retype them in seeds, tests, fixtures, or UI copy; import them.
+
+### Department
+A single primary department:
+
+> **Department of Computer Science (UBIT - Umaer Basha Institute of Information Technology)** — code `UBIT`
+
+### Degree Programmes (4, fixed)
+
+| Code | Name | Semesters |
+| :--- | :--- | :--- |
+| `BSSE` | BS Software Engineering | 8 |
+| `BSCS` | BS Computer Science | 8 |
+| `BSAI` | BS Artificial Intelligence | 8 |
+| `BSDS` | BS Data Science | 8 |
+
+Programmes are identified by `code`, which is `UNIQUE` on the `programs` table. Courses attach to a programme; the CLO→PLO mapping engine scopes suggestions to a CLO's own programme.
+
+### Standard PLOs (10, shared by all 4 programmes)
+
+| Code | Title | Bloom Domain |
+| :--- | :--- | :--- |
+| `PLO-1` | Academic Education | Cognitive |
+| `PLO-2` | Knowledge for Solving Computing Problems | Cognitive |
+| `PLO-3` | Problem Analysis | Cognitive |
+| `PLO-4` | Design and Development of Solutions | Cognitive |
+| `PLO-5` | Modern Tool Usage | Psychomotor |
+| `PLO-6` | Individual and Team Work | Affective |
+| `PLO-7` | Communication | Affective |
+| `PLO-8` | Computing Professionalism and Society | Affective |
+| `PLO-9` | Ethics | Affective |
+| `PLO-10` | Lifelong Learning | Affective |
+
+Full descriptions live in `institution.py`. The wording follows the standard NCEAC / Seoul Accord computing outcomes — **verify against the department's own OBE manual before treating it as authoritative.**
+
+### "Shared" PLOs are stored per programme
+`plos.program_id` is a foreign key, so each programme owns its own ten PLO rows: **4 programmes × 10 outcomes = 40 rows.** The *definitions* are shared; the *rows* are per-programme. This is deliberate:
+* it keeps `/api/v1/mappings/suggest` correctly scoped to a single programme's PLOs;
+* it lets one programme revise its wording later without disturbing the other three;
+* it avoids a many-to-many join table that would buy nothing at this scale.
+
+### Seeding
+```bash
+python scripts/seed_ubit_data.py                     # create/reconcile
+python scripts/seed_ubit_data.py --force-embeddings  # recompute every vector
+```
+The script is **idempotent** — it matches existing rows by unique code and reconciles rather than duplicating. Each PLO gets a 384-dim `all-MiniLM-L6-v2` embedding. Because the ten outcome texts are identical across programmes, the script encodes each *distinct* text once and reuses the vector across all four programmes (10 inferences, not 40); an unchanged re-run performs no inference at all.
+
+Run this once after `alembic upgrade head` on a fresh database, before creating courses.

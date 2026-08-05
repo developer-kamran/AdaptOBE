@@ -19,14 +19,27 @@ async def get_program(db: AsyncSession, program_id: int) -> Program:
     return program
 
 
+CONFLICT_MESSAGE = "A programme with this code already exists, or the department reference is invalid"
+
+
+async def get_program_by_code(db: AsyncSession, code: str) -> Program | None:
+    result = await db.execute(select(Program).where(Program.code == code))
+    return result.scalar_one_or_none()
+
+
 async def create_program(db: AsyncSession, data: ProgramCreate) -> Program:
-    program = Program(dept_id=data.dept_id, name=data.name, total_semesters=data.total_semesters)
+    program = Program(
+        dept_id=data.dept_id,
+        code=data.code,
+        name=data.name,
+        total_semesters=data.total_semesters,
+    )
     db.add(program)
     try:
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise ConflictError("Invalid department reference") from exc
+        raise ConflictError(CONFLICT_MESSAGE) from exc
 
     await db.refresh(program)
     return program
@@ -42,7 +55,7 @@ async def update_program(db: AsyncSession, program_id: int, data: ProgramUpdate)
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        raise ConflictError("Invalid department reference") from exc
+        raise ConflictError(CONFLICT_MESSAGE) from exc
 
     await db.refresh(program)
     return program

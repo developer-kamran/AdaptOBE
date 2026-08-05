@@ -15,7 +15,7 @@ async def test_create_program_requires_admin(client, make_user):
     student = await make_user("student.prog@adaptobe.edu", role=UserRole.student)
     resp = await client.post(
         "/api/v1/admin/programs",
-        json={"dept_id": 1, "name": "BSc CS", "total_semesters": 8},
+        json={"dept_id": 1, "code": "BSCS-X", "name": "BS CS", "total_semesters": 8},
         headers=auth_header(student),
     )
     assert resp.status_code == 403
@@ -27,10 +27,16 @@ async def test_create_and_list_programs(client, make_user):
 
     resp = await client.post(
         "/api/v1/admin/programs",
-        json={"dept_id": dept_id, "name": "BSc Computer Science", "total_semesters": 8},
+        json={
+            "dept_id": dept_id,
+            "code": "BSCS-P1",
+            "name": "BS Computer Science",
+            "total_semesters": 8,
+        },
         headers=auth_header(admin),
     )
     assert resp.status_code == 201
+    assert resp.json()["code"] == "BSCS-P1"
     program_id = resp.json()["id"]
 
     list_resp = await client.get("/api/v1/admin/programs", headers=auth_header(admin))
@@ -42,10 +48,38 @@ async def test_create_program_invalid_department_conflict(client, make_user):
     admin = await make_user("admin.proginvalid@adaptobe.edu", role=UserRole.admin)
     resp = await client.post(
         "/api/v1/admin/programs",
-        json={"dept_id": 999999, "name": "Ghost Program", "total_semesters": 8},
+        json={
+            "dept_id": 999999,
+            "code": "GHOST",
+            "name": "Ghost Program",
+            "total_semesters": 8,
+        },
         headers=auth_header(admin),
     )
     assert resp.status_code == 409
+
+
+async def test_create_program_duplicate_code_conflict(client, make_user):
+    admin = await make_user("admin.progdup@adaptobe.edu", role=UserRole.admin)
+    dept_id = await _create_department(client, admin, "PROGDUP")
+
+    payload = {
+        "dept_id": dept_id,
+        "code": "BSSE-DUP",
+        "name": "BS Software Engineering",
+        "total_semesters": 8,
+    }
+    first = await client.post(
+        "/api/v1/admin/programs", json=payload, headers=auth_header(admin)
+    )
+    assert first.status_code == 201
+
+    second = await client.post(
+        "/api/v1/admin/programs",
+        json={**payload, "name": "Another Programme"},
+        headers=auth_header(admin),
+    )
+    assert second.status_code == 409
 
 
 async def test_create_program_invalid_total_semesters(client, make_user):
@@ -54,7 +88,12 @@ async def test_create_program_invalid_total_semesters(client, make_user):
 
     resp = await client.post(
         "/api/v1/admin/programs",
-        json={"dept_id": dept_id, "name": "Bad Program", "total_semesters": 0},
+        json={
+            "dept_id": dept_id,
+            "code": "BAD-SEM",
+            "name": "Bad Program",
+            "total_semesters": 0,
+        },
         headers=auth_header(admin),
     )
     assert resp.status_code == 422
@@ -66,7 +105,12 @@ async def test_update_and_delete_program(client, make_user):
 
     create_resp = await client.post(
         "/api/v1/admin/programs",
-        json={"dept_id": dept_id, "name": "BSc Software Engineering", "total_semesters": 8},
+        json={
+            "dept_id": dept_id,
+            "code": "BSSE-P3",
+            "name": "BS Software Engineering",
+            "total_semesters": 8,
+        },
         headers=auth_header(admin),
     )
     program_id = create_resp.json()["id"]

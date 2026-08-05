@@ -57,7 +57,9 @@ async def test_suggest_only_returns_plos_from_same_program(
     )
     other_program = await program_service.create_program(
         db_session,
-        ProgramCreate(dept_id=other_dept.id, name="BSc Electrical", total_semesters=8),
+        ProgramCreate(
+            dept_id=other_dept.id, code="BSEE-TEST", name="BS Electrical", total_semesters=8
+        ),
     )
 
     await make_plo("PLO-SAME", "Programming", "Write and debug computer programs.")
@@ -180,7 +182,9 @@ async def test_confirm_rejects_cross_program_mapping(
     )
     other_program = await program_service.create_program(
         db_session,
-        ProgramCreate(dept_id=other_dept.id, name="BSc Mechanical", total_semesters=8),
+        ProgramCreate(
+            dept_id=other_dept.id, code="BSME-TEST", name="BS Mechanical", total_semesters=8
+        ),
     )
     foreign_plo = await make_plo(
         "PLO-FOREIGN", "Thermo", "Apply thermodynamics.", program_id=other_program.id

@@ -9,5 +9,7 @@ class Program(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     dept_id: Mapped[int] = mapped_column(ForeignKey("departments.id"), nullable=False)
+    # Short institutional code, e.g. BSSE / BSCS / BSAI / BSDS.
+    code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     total_semesters: Mapped[int] = mapped_column(Integer, nullable=False)

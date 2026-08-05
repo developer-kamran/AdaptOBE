@@ -119,7 +119,12 @@ async def program(db_session):
     )
     return await program_service.create_program(
         db_session,
-        ProgramCreate(dept_id=department.id, name="BSc Computer Science", total_semesters=8),
+        ProgramCreate(
+            dept_id=department.id,
+            code="BSCS-TEST",
+            name="BS Computer Science",
+            total_semesters=8,
+        ),
     )
 
 
