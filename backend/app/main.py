@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -16,9 +18,19 @@ from app.routers import (
     plos,
     programs,
     users,
+    ws,
 )
+from app.services import notifications
 
-app = FastAPI(title="AdaptOBE API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    notifications.subscribe(ws.forward_to_websockets)
+    yield
+    notifications.unsubscribe(ws.forward_to_websockets)
+
+
+app = FastAPI(title="AdaptOBE API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +51,7 @@ app.include_router(enrollments.router)
 app.include_router(mappings.router)
 app.include_router(assessments.router)
 app.include_router(attainment.router)
+app.include_router(ws.router)
 
 
 @app.get("/api/v1/health")

@@ -41,10 +41,12 @@ AdaptOBE is an Intelligent Outcome-Based Education (OBE) Attainment & Adaptive L
     /pages
     /hooks
     /api           (fetch/axios wrappers per resource)
-    /context or /store  (state management — decide and document here once chosen)
+    /context       (state management — React Context API; see note below)
 ```
 
 Keep business logic (attainment math, ML calls) out of routers — routers should call into `/services` or `/ml`, not contain calculation logic inline. This keeps the math testable in isolation.
+
+**State management (decided in Module 4):** plain React Context + hooks (`AuthContext`), no external state library. The app's shared client state is small — the authenticated user and JWT pair — and each page owns its own server data via local `useState`/`useEffect` plus the `/api` wrappers. Reassess only if cross-page state genuinely grows past what Context comfortably handles.
 
 ---
 

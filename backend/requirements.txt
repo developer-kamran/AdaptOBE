@@ -10,6 +10,8 @@ pgvector
 python-jose[cryptography]
 bcrypt
 sentence-transformers
+reportlab
+openpyxl
 
 pytest
 pytest-asyncio

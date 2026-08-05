@@ -166,3 +166,18 @@ async def test_refresh_rejects_access_token(client, make_user):
 async def test_refresh_rejects_garbage_token(client):
     resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": "not-a-jwt"})
     assert resp.status_code == 401
+
+
+async def test_me_returns_current_user(client, make_user):
+    user = await make_user("me@adaptobe.edu", full_name="Me User", role=UserRole.faculty)
+    resp = await client.get("/api/v1/auth/me", headers=auth_header(user))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email"] == "me@adaptobe.edu"
+    assert body["role"] == "faculty"
+    assert "password" not in body
+
+
+async def test_me_requires_authentication(client):
+    resp = await client.get("/api/v1/auth/me")
+    assert resp.status_code == 401
