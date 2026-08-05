@@ -1,0 +1,22 @@
+## Python
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+## Env
+.env
+backend/.env
+
+## Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+## OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+## Claude Code local session files
+.claude/
