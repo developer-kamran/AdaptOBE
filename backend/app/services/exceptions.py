@@ -4,3 +4,11 @@ class ConflictError(Exception):
 
 class NotFoundError(Exception):
     """Raised when a requested record does not exist."""
+
+
+class PermissionDeniedError(Exception):
+    """Raised when a user may not act on a resource they do not own."""
+
+
+class ValidationError(Exception):
+    """Raised when a request is well-formed but semantically invalid."""

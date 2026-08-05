@@ -9,6 +9,7 @@ python-dotenv
 pgvector
 python-jose[cryptography]
 bcrypt
+sentence-transformers
 
 pytest
 pytest-asyncio

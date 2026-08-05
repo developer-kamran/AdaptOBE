@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.routers import auth, departments, programs, users
+from app.routers import auth, courses, departments, mappings, plos, programs, users
 
 app = FastAPI(title="AdaptOBE API")
 
@@ -21,6 +21,10 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(departments.router)
 app.include_router(programs.router)
+app.include_router(plos.router)
+app.include_router(courses.router)
+app.include_router(courses.clo_router)
+app.include_router(mappings.router)
 
 
 @app.get("/api/v1/health")
