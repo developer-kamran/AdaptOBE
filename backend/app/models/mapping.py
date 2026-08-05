@@ -12,8 +12,12 @@ class CloPloMapping(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    clo_id: Mapped[int] = mapped_column(ForeignKey("clos.id"), nullable=False)
-    plo_id: Mapped[int] = mapped_column(ForeignKey("plos.id"), nullable=False)
+    clo_id: Mapped[int] = mapped_column(
+        ForeignKey("clos.id", ondelete="CASCADE"), nullable=False
+    )
+    plo_id: Mapped[int] = mapped_column(
+        ForeignKey("plos.id", ondelete="CASCADE"), nullable=False
+    )
     strength: Mapped[int] = mapped_column(Integer, nullable=False)
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     similarity_score: Mapped[float | None] = mapped_column(Float, nullable=True)

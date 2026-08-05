@@ -13,20 +13,28 @@ from app.core.database import get_db
 from app.core.security import create_access_token
 from app.main import app
 from app.ml import embeddings
+from app.models.assessment import AssessmentType
 from app.models.user import User, UserRole
+from app.schemas.assessment import AssessmentCreate
 from app.schemas.clo import CLOCreate
 from app.schemas.course import CourseCreate
 from app.schemas.department import DepartmentCreate
 from app.schemas.plo import PLOCreate
 from app.schemas.program import ProgramCreate
+from app.schemas.question import QuestionCreate
+from app.schemas.score import BulkScoreRequest, ScoreEntry
 from app.schemas.user import UserCreate
 from app.services import (
+    assessment_service,
     auth_service,
     clo_service,
     course_service,
     department_service,
+    enrollment_service,
     plo_service,
     program_service,
+    question_service,
+    score_service,
 )
 
 # A dedicated NullPool engine avoids reusing pooled asyncpg connections
@@ -162,3 +170,93 @@ async def make_clo(db_session, course, faculty):
         )
 
     return _make_clo
+
+
+@pytest_asyncio.fixture
+async def make_student(make_user):
+    async def _make_student(suffix: str, **kwargs):
+        return await make_user(
+            f"student.{suffix}@adaptobe.edu",
+            full_name=f"Student {suffix}",
+            role=UserRole.student,
+            **kwargs,
+        )
+
+    return _make_student
+
+
+@pytest_asyncio.fixture
+async def enroll(db_session, course, faculty):
+    async def _enroll(*students, course_id: int | None = None):
+        return await enrollment_service.enroll_students(
+            db_session,
+            course_id if course_id is not None else course.id,
+            [student.id for student in students],
+            faculty,
+        )
+
+    return _enroll
+
+
+@pytest_asyncio.fixture
+async def make_assessment(db_session, course, faculty):
+    async def _make_assessment(
+        title: str = "Quiz 1",
+        assessment_type: AssessmentType = AssessmentType.quiz,
+        total_marks: float = 10.0,
+        weightage_percent: float = 10.0,
+        course_id: int | None = None,
+    ):
+        return await assessment_service.create_assessment(
+            db_session,
+            AssessmentCreate(
+                course_id=course_id if course_id is not None else course.id,
+                title=title,
+                type=assessment_type,
+                total_marks=total_marks,
+                weightage_percent=weightage_percent,
+            ),
+            faculty,
+        )
+
+    return _make_assessment
+
+
+@pytest_asyncio.fixture
+async def make_question(db_session, faculty):
+    async def _make_question(
+        assessment_id: int,
+        question_number: int,
+        marks: float,
+        clo_id: int | None = None,
+        text: str | None = None,
+    ):
+        return await question_service.create_question(
+            db_session,
+            assessment_id,
+            QuestionCreate(
+                question_number=question_number, marks=marks, clo_id=clo_id, text=text
+            ),
+            faculty,
+        )
+
+    return _make_question
+
+
+@pytest_asyncio.fixture
+async def enter_scores(db_session, faculty):
+    async def _enter_scores(assessment_id: int, entries: list[tuple[int, int, float]]):
+        """entries: list of (question_id, student_id, marks_obtained)."""
+        return await score_service.bulk_enter_scores(
+            db_session,
+            assessment_id,
+            BulkScoreRequest(
+                scores=[
+                    ScoreEntry(question_id=q, student_id=s, marks_obtained=m)
+                    for q, s, m in entries
+                ]
+            ),
+            faculty,
+        )
+
+    return _enter_scores
