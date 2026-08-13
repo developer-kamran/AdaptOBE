@@ -1,34 +1,34 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import {
-  createQuestion,
-  getAssessment,
-  listQuestions,
-  listScores,
-  submitScores,
-  suggestQuestionTag,
-} from '../api/assessments'
+import { deleteQuestion, getAssessment, listQuestions, listScores, submitScores } from '../api/assessments'
 import { listClos } from '../api/clos'
 import { listEnrollments, listStudents } from '../api/enrollments'
 import { ApiError } from '../api/client'
 import Navbar from '../components/Navbar'
 import Button from '../components/ui/Button'
-import Input from '../components/ui/Input'
-import Textarea from '../components/ui/Textarea'
-import Select from '../components/ui/Select'
-import Modal, { ModalFooter } from '../components/ui/Modal'
 import Spinner from '../components/ui/Spinner'
 import Badge from '../components/ui/Badge'
 import { Table, THead, TH, TBody, TR, TD } from '../components/ui/Table'
 import EmptyState from '../components/ui/EmptyState'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
+import QuestionTypeStep from './assessment/QuestionTypeStep'
+import QuestionFormModal from './assessment/QuestionFormModal'
+import BulkQuestionModal from './assessment/BulkQuestionModal'
+import LabProjectPanel from './assessment/LabProjectPanel'
+import { QUESTION_TYPE_LABEL, QUESTION_TYPES, typeSummary } from './assessment/questionTypes'
+
+const LAB_PROJECT_TYPES = new Set(['lab', 'project'])
 
 export default function AssessmentDetailPage() {
   const { courseId, assessmentId } = useParams()
   const [assessment, setAssessment] = useState(null)
   const [questions, setQuestions] = useState(null)
   const [clos, setClos] = useState([])
-  const [isQuestionModalOpen, setIsQuestionModalOpen] = useState(false)
+  const [error, setError] = useState('')
+
+  const [isTypeStepOpen, setIsTypeStepOpen] = useState(false)
+  const [formModal, setFormModal] = useState(null) // { mode, type, question } | null
+  const [bulkModal, setBulkModal] = useState(null) // { type, quantity } | null
 
   const loadQuestions = () => listQuestions(Number(assessmentId)).then(setQuestions)
 
@@ -41,10 +41,39 @@ export default function AssessmentDetailPage() {
 
   const cloLookup = new Map(clos.map((c) => [c.id, c]))
 
+  const existingNumbers = useMemo(
+    () => new Set((questions ?? []).map((q) => q.question_number)),
+    [questions],
+  )
+  const usedMarks = useMemo(() => (questions ?? []).reduce((sum, q) => sum + q.marks, 0), [questions])
+  const remainingMarks = assessment ? assessment.total_marks - usedMarks : null
+  const nextNumber = (questions?.length ?? 0) + 1
+
+  function handleTypeContinue(type, quantity) {
+    setIsTypeStepOpen(false)
+    const meta = QUESTION_TYPES.find((t) => t.value === type)
+    if (meta?.mode === 'bulk') {
+      setBulkModal({ type, quantity })
+    } else {
+      setFormModal({ mode: 'create', type, question: null })
+    }
+  }
+
+  async function handleDeleteQuestion(question) {
+    if (!window.confirm(`Delete question #${question.question_number}?`)) return
+    setError('')
+    try {
+      await deleteQuestion(question.id)
+      loadQuestions()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-6 flex flex-col gap-5">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:px-6 sm:py-6 flex flex-col gap-5">
         <div>
           <Link
             to={`/courses/${courseId}`}
@@ -57,58 +86,107 @@ export default function AssessmentDetailPage() {
               <h1 className="text-xl font-semibold text-ink-900">{assessment.title}</h1>
               <p className="text-sm text-ink-500 mt-0.5">
                 {assessment.total_marks} marks · {assessment.weightage_percent}% weightage
+                {questions && (
+                  <span className={remainingMarks < 0 ? 'text-danger-600' : ''}>
+                    {' '}
+                    · {usedMarks}/{assessment.total_marks} marks used
+                  </span>
+                )}
               </p>
             </div>
           )}
         </div>
 
-        <Card>
-          <CardHeader
-            title="Questions"
-            description="Tag each question with the CLO it assesses."
-            actions={
-              <Button size="sm" onClick={() => setIsQuestionModalOpen(true)}>
-                + Add Question
-              </Button>
-            }
+        {assessment && LAB_PROJECT_TYPES.has(assessment.type) ? (
+          <LabProjectPanel
+            assessmentType={assessment.type}
+            assessmentId={Number(assessmentId)}
+            questions={questions}
+            clos={clos}
+            cloLookup={cloLookup}
+            nextNumber={nextNumber}
+            remainingMarks={remainingMarks}
+            existingNumbers={existingNumbers}
+            onChanged={loadQuestions}
           />
-          <CardBody>
-            {questions === null ? (
-              <div className="flex justify-center py-8">
-                <Spinner />
-              </div>
-            ) : questions.length === 0 ? (
-              <EmptyState title="No questions yet" />
-            ) : (
-              <Table>
-                <THead>
-                  <TR>
-                    <TH>#</TH>
-                    <TH>Marks</TH>
-                    <TH>CLO Tag</TH>
-                    <TH>Text</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {questions.map((q) => (
-                    <TR key={q.id}>
-                      <TD className="font-medium">{q.question_number}</TD>
-                      <TD>{q.marks}</TD>
-                      <TD>
-                        {q.clo_id ? (
-                          <Badge tone="brand">{cloLookup.get(q.clo_id)?.code ?? `#${q.clo_id}`}</Badge>
-                        ) : (
-                          <span className="text-ink-400 text-xs">Untagged</span>
-                        )}
-                      </TD>
-                      <TD className="text-ink-500 max-w-xs truncate">{q.text}</TD>
+        ) : (
+          <Card>
+            <CardHeader
+              title="Questions"
+              description="Tag each question with the CLO it assesses."
+              actions={
+                <Button size="sm" onClick={() => setIsTypeStepOpen(true)}>
+                  + Add Question
+                </Button>
+              }
+            />
+            <CardBody>
+              {error && (
+                <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2 mb-4">{error}</p>
+              )}
+              {questions === null ? (
+                <div className="flex justify-center py-8">
+                  <Spinner />
+                </div>
+              ) : questions.length === 0 ? (
+                <EmptyState title="No questions yet" />
+              ) : (
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>#</TH>
+                      <TH>Type</TH>
+                      <TH>Marks</TH>
+                      <TH>CLO Tag</TH>
+                      <TH>Text / Details</TH>
+                      <TH></TH>
                     </TR>
-                  ))}
-                </TBody>
-              </Table>
-            )}
-          </CardBody>
-        </Card>
+                  </THead>
+                  <TBody>
+                    {questions.map((q) => (
+                      <TR key={q.id}>
+                        <TD className="font-medium">{q.question_number}</TD>
+                        <TD>
+                          <Badge tone="neutral">{QUESTION_TYPE_LABEL[q.question_type] ?? q.question_type}</Badge>
+                        </TD>
+                        <TD>{q.marks}</TD>
+                        <TD>
+                          {q.clo_id ? (
+                            <Badge tone="brand">{cloLookup.get(q.clo_id)?.code ?? `#${q.clo_id}`}</Badge>
+                          ) : (
+                            <span className="text-ink-400 text-xs">Untagged</span>
+                          )}
+                        </TD>
+                        <TD className="text-ink-500 max-w-xs">
+                          <p className="truncate">{q.text}</p>
+                          {q.question_type !== 'question' && (
+                            <p className="text-xs text-ink-400 mt-0.5 truncate">{typeSummary(q)}</p>
+                          )}
+                        </TD>
+                        <TD>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setFormModal({ mode: 'edit', type: q.question_type, question: q })
+                              }
+                            >
+                              Edit
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDeleteQuestion(q)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+              )}
+            </CardBody>
+          </Card>
+        )}
 
         {questions && questions.length > 0 && (
           <ScoreEntryCard
@@ -119,156 +197,47 @@ export default function AssessmentDetailPage() {
         )}
       </main>
 
-      <AddQuestionModal
-        isOpen={isQuestionModalOpen}
-        onClose={() => setIsQuestionModalOpen(false)}
-        onCreated={loadQuestions}
-        assessmentId={Number(assessmentId)}
-        clos={clos}
-        nextNumber={(questions?.length ?? 0) + 1}
+      <QuestionTypeStep
+        isOpen={isTypeStepOpen}
+        onClose={() => setIsTypeStepOpen(false)}
+        onContinue={handleTypeContinue}
       />
-    </div>
-  )
-}
 
-function AddQuestionModal({ isOpen, onClose, onCreated, assessmentId, clos, nextNumber }) {
-  const [questionNumber, setQuestionNumber] = useState(nextNumber)
-  const [marks, setMarks] = useState('10')
-  const [text, setText] = useState('')
-  const [cloId, setCloId] = useState('')
-  const [suggestions, setSuggestions] = useState(null)
-  const [isSuggesting, setIsSuggesting] = useState(false)
-  const [error, setError] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-
-  useEffect(() => {
-    if (isOpen) {
-      setQuestionNumber(nextNumber)
-      setMarks('10')
-      setText('')
-      setCloId('')
-      setSuggestions(null)
-      setError('')
-    }
-  }, [isOpen, nextNumber])
-
-  async function handleSuggest() {
-    if (!text.trim()) return
-    setIsSuggesting(true)
-    try {
-      const result = await suggestQuestionTag(assessmentId, text)
-      setSuggestions(result.suggestions)
-    } catch {
-      setSuggestions([])
-    } finally {
-      setIsSuggesting(false)
-    }
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    setError('')
-    setIsSubmitting(true)
-    try {
-      await createQuestion(assessmentId, {
-        question_number: Number(questionNumber),
-        marks: Number(marks),
-        clo_id: cloId ? Number(cloId) : undefined,
-        text: text || undefined,
-      })
-      onClose()
-      onCreated()
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Question">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="Question #"
-            type="number"
-            min="1"
-            value={questionNumber}
-            onChange={(e) => setQuestionNumber(e.target.value)}
-            required
-          />
-          <Input
-            label="Marks"
-            type="number"
-            min="0"
-            value={marks}
-            onChange={(e) => setMarks(e.target.value)}
-            required
-          />
-        </div>
-        <Textarea
-          label="Question Text (optional)"
-          placeholder="Design a normalised relational schema for..."
-          rows={2}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
+      {formModal && (
+        <QuestionFormModal
+          isOpen
+          onClose={() => setFormModal(null)}
+          onSaved={loadQuestions}
+          assessmentId={Number(assessmentId)}
+          clos={clos}
+          nextNumber={nextNumber}
+          mode={formModal.mode}
+          type={formModal.type}
+          question={formModal.question}
+          remainingMarks={
+            formModal.mode === 'edit'
+              ? remainingMarks + (formModal.question?.marks ?? 0)
+              : remainingMarks
+          }
+          existingNumbers={existingNumbers}
         />
+      )}
 
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <label className="text-sm font-medium text-ink-700">CLO Tag</label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={handleSuggest}
-              isLoading={isSuggesting}
-              disabled={!text.trim()}
-            >
-              Suggest with AI
-            </Button>
-          </div>
-          <Select value={cloId} onChange={(e) => setCloId(e.target.value)}>
-            <option value="">— Untagged —</option>
-            {clos.map((clo) => (
-              <option key={clo.id} value={clo.id}>
-                {clo.code} — {clo.title}
-              </option>
-            ))}
-          </Select>
-
-          {suggestions && suggestions.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {suggestions.map((s) => (
-                <button
-                  key={s.clo_id}
-                  type="button"
-                  onClick={() => setCloId(String(s.clo_id))}
-                  className={`text-xs rounded-full px-2.5 py-1 border transition-colors
-                    ${
-                      cloId === String(s.clo_id)
-                        ? 'bg-brand-600 text-white border-brand-600'
-                        : 'bg-white text-ink-700 border-border-strong hover:border-brand-400'
-                    }`}
-                >
-                  {s.code} · {s.similarity_score.toFixed(2)}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {error && <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2">{error}</p>}
-        <ModalFooter>
-          <Button type="button" variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" isLoading={isSubmitting}>
-            Create
-          </Button>
-        </ModalFooter>
-      </form>
-    </Modal>
+      {bulkModal && (
+        <BulkQuestionModal
+          isOpen
+          onClose={() => setBulkModal(null)}
+          onSaved={loadQuestions}
+          assessmentId={Number(assessmentId)}
+          clos={clos}
+          nextNumber={nextNumber}
+          type={bulkModal.type}
+          quantity={bulkModal.quantity}
+          remainingMarks={remainingMarks}
+          existingNumbers={existingNumbers}
+        />
+      )}
+    </div>
   )
 }
 

@@ -1,4 +1,15 @@
+import enum
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class PLODomain(str, enum.Enum):
+    """Bloom's three learning domains -- matches the literal strings already
+    seeded for all 40 institutional PLOs in app/core/institution.py."""
+
+    cognitive = "Cognitive"
+    psychomotor = "Psychomotor"
+    affective = "Affective"
 
 
 class PLOCreate(BaseModel):
@@ -6,14 +17,14 @@ class PLOCreate(BaseModel):
     code: str = Field(min_length=1, max_length=50)
     title: str = Field(min_length=1, max_length=255)
     description: str = Field(min_length=1)
-    domain: str | None = Field(default=None, max_length=100)
+    domain: PLODomain | None = None
 
 
 class PLOUpdate(BaseModel):
     code: str | None = Field(default=None, min_length=1, max_length=50)
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = Field(default=None, min_length=1)
-    domain: str | None = Field(default=None, max_length=100)
+    domain: PLODomain | None = None
 
 
 class PLORead(BaseModel):

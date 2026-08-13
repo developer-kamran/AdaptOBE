@@ -5,7 +5,7 @@ from app.ml import embeddings
 from app.models.clo import CLO
 from app.models.user import User
 from app.schemas.clo import CLOCreate, CLOUpdate
-from app.services import course_service
+from app.services import attainment_service, course_service
 from app.services.exceptions import NotFoundError
 
 
@@ -66,6 +66,11 @@ async def update_clo(db: AsyncSession, clo_id: int, data: CLOUpdate, user: User)
 
 async def delete_clo(db: AsyncSession, clo_id: int, user: User) -> None:
     clo = await get_clo(db, clo_id)
-    await course_service.get_course_for_user(db, clo.course_id, user)
+    course_id = clo.course_id
+    await course_service.get_course_for_user(db, course_id, user)
     await db.delete(clo)
     await db.commit()
+
+    # Deleting a CLO untags any questions that pointed at it (SET NULL) and
+    # cascade-deletes its CLO-PLO mappings, both of which change attainment.
+    await attainment_service.recalculate_course_attainment(db, course_id)

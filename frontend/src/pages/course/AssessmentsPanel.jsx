@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createAssessment, listAssessments } from '../../api/assessments'
+import {
+  createAssessment,
+  deleteAssessment,
+  listAssessments,
+  updateAssessment,
+} from '../../api/assessments'
 import { ApiError } from '../../api/client'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
@@ -15,6 +20,7 @@ const TYPE_LABEL = {
   quiz: 'Quiz',
   assignment: 'Assignment',
   lab: 'Lab',
+  project: 'Project',
   midterm: 'Midterm',
   final: 'Final',
 }
@@ -22,6 +28,8 @@ const TYPE_LABEL = {
 export default function AssessmentsPanel({ course }) {
   const [assessments, setAssessments] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [error, setError] = useState('')
   const navigate = useNavigate()
 
   const load = () => listAssessments(course.id).then(setAssessments)
@@ -31,11 +39,24 @@ export default function AssessmentsPanel({ course }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [course.id])
 
+  async function handleDelete(e, assessment) {
+    e.stopPropagation()
+    if (!window.confirm(`Delete assessment "${assessment.title}"? This also removes its questions and scores.`))
+      return
+    setError('')
+    try {
+      await deleteAssessment(assessment.id)
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
+    }
+  }
+
   const totalWeightage = (assessments ?? []).reduce((sum, a) => sum + a.weightage_percent, 0)
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <p className="text-sm text-ink-500">
           Assessments for {course.code}
           {assessments && (
@@ -45,10 +66,14 @@ export default function AssessmentsPanel({ course }) {
             </span>
           )}
         </p>
-        <Button size="sm" onClick={() => setIsModalOpen(true)}>
+        <Button size="sm" onClick={() => setIsModalOpen(true)} className="self-start sm:self-auto">
           + Add Assessment
         </Button>
       </div>
+
+      {error && (
+        <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2 mb-4">{error}</p>
+      )}
 
       {assessments === null ? (
         <div className="flex justify-center py-12">
@@ -80,24 +105,50 @@ export default function AssessmentsPanel({ course }) {
                 </TD>
                 <TD>{assessment.total_marks}</TD>
                 <TD>{assessment.weightage_percent}%</TD>
-                <TD className="text-brand-600 text-xs font-medium">Manage →</TD>
+                <TD>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditing(assessment)
+                      }}
+                    >
+                      Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={(e) => handleDelete(e, assessment)}>
+                      Delete
+                    </Button>
+                    <span className="text-brand-600 text-xs font-medium">Manage →</span>
+                  </div>
+                </TD>
               </TR>
             ))}
           </TBody>
         </Table>
       )}
 
-      <CreateAssessmentModal
+      <AssessmentFormModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onCreated={load}
+        onSaved={load}
         courseId={course.id}
+        mode="create"
+      />
+      <AssessmentFormModal
+        isOpen={editing !== null}
+        onClose={() => setEditing(null)}
+        onSaved={load}
+        courseId={course.id}
+        mode="edit"
+        assessment={editing}
       />
     </div>
   )
 }
 
-function CreateAssessmentModal({ isOpen, onClose, onCreated, courseId }) {
+function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessment }) {
   const [title, setTitle] = useState('')
   const [type, setType] = useState('quiz')
   const [totalMarks, setTotalMarks] = useState('10')
@@ -106,31 +157,36 @@ function CreateAssessmentModal({ isOpen, onClose, onCreated, courseId }) {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  function reset() {
-    setTitle('')
-    setType('quiz')
-    setTotalMarks('10')
-    setWeightagePercent('10')
-    setDate('')
-    setError('')
-  }
+  useEffect(() => {
+    if (isOpen) {
+      setTitle(assessment?.title ?? '')
+      setType(assessment?.type ?? 'quiz')
+      setTotalMarks(assessment ? String(assessment.total_marks) : '10')
+      setWeightagePercent(assessment ? String(assessment.weightage_percent) : '10')
+      setDate(assessment?.date ?? '')
+      setError('')
+    }
+  }, [isOpen, assessment])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setIsSubmitting(true)
     try {
-      await createAssessment({
-        course_id: courseId,
+      const data = {
         title,
         type,
         total_marks: Number(totalMarks),
         weightage_percent: Number(weightagePercent),
         date: date || undefined,
-      })
-      reset()
+      }
+      if (mode === 'edit') {
+        await updateAssessment(assessment.id, data)
+      } else {
+        await createAssessment({ course_id: courseId, ...data })
+      }
       onClose()
-      onCreated()
+      onSaved()
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
     } finally {
@@ -139,7 +195,7 @@ function CreateAssessmentModal({ isOpen, onClose, onCreated, courseId }) {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Assessment">
+    <Modal isOpen={isOpen} onClose={onClose} title={mode === 'edit' ? 'Edit Assessment' : 'Add Assessment'}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <Input
           label="Title"
@@ -155,7 +211,7 @@ function CreateAssessmentModal({ isOpen, onClose, onCreated, courseId }) {
             </option>
           ))}
         </Select>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Input
             label="Total Marks"
             type="number"
@@ -181,7 +237,7 @@ function CreateAssessmentModal({ isOpen, onClose, onCreated, courseId }) {
             Cancel
           </Button>
           <Button type="submit" isLoading={isSubmitting}>
-            Create
+            {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
         </ModalFooter>
       </form>

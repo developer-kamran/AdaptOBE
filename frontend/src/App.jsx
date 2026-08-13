@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { AuthProvider } from './context/AuthContext'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -7,6 +7,26 @@ import AdminPage from './pages/AdminPage'
 import CoursesPage from './pages/CoursesPage'
 import CourseDetailPage from './pages/CourseDetailPage'
 import AssessmentDetailPage from './pages/AssessmentDetailPage'
+import Spinner from './components/ui/Spinner'
+
+function HomeRedirect() {
+  const { user, isLoading } = useAuth()
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Spinner className="h-6 w-6" />
+      </div>
+    )
+  }
+
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role === 'super_admin' || user.role === 'sub_admin') {
+    return <Navigate to="/admin" replace />
+  }
+  if (user.role === 'faculty') return <Navigate to="/dashboard" replace />
+  return <Navigate to="/courses" replace />
+}
 
 export default function App() {
   return (
@@ -17,7 +37,7 @@ export default function App() {
           <Route
             path="/dashboard"
             element={
-              <ProtectedRoute roles={['faculty', 'admin']}>
+              <ProtectedRoute roles={['faculty']}>
                 <DashboardPage />
               </ProtectedRoute>
             }
@@ -25,7 +45,7 @@ export default function App() {
           <Route
             path="/admin"
             element={
-              <ProtectedRoute roles={['admin']}>
+              <ProtectedRoute roles={['super_admin', 'sub_admin']}>
                 <AdminPage />
               </ProtectedRoute>
             }
@@ -33,7 +53,7 @@ export default function App() {
           <Route
             path="/courses"
             element={
-              <ProtectedRoute roles={['faculty', 'admin']}>
+              <ProtectedRoute roles={['faculty', 'sub_admin']}>
                 <CoursesPage />
               </ProtectedRoute>
             }
@@ -41,7 +61,7 @@ export default function App() {
           <Route
             path="/courses/:courseId"
             element={
-              <ProtectedRoute roles={['faculty', 'admin']}>
+              <ProtectedRoute roles={['faculty']}>
                 <CourseDetailPage />
               </ProtectedRoute>
             }
@@ -49,13 +69,13 @@ export default function App() {
           <Route
             path="/courses/:courseId/assessments/:assessmentId"
             element={
-              <ProtectedRoute roles={['faculty', 'admin']}>
+              <ProtectedRoute roles={['faculty']}>
                 <AssessmentDetailPage />
               </ProtectedRoute>
             }
           />
-          <Route path="/" element={<Navigate to="/courses" replace />} />
-          <Route path="*" element={<Navigate to="/courses" replace />} />
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="*" element={<HomeRedirect />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

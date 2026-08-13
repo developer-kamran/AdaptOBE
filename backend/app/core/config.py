@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # Fernet key used to reversibly encrypt a copy of each user's password so
+    # it can be shown again from the admin Edit page. Never used for login.
+    password_encryption_key: str
+
     cors_origins: str = "http://localhost:5173"
 
     @property

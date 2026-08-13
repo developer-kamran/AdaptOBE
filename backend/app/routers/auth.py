@@ -13,8 +13,8 @@ from app.schemas.user import (
     UserCreate,
     UserRead,
 )
-from app.services import auth_service
-from app.services.exceptions import ConflictError
+from app.services import auth_service, user_service
+from app.services.exceptions import ConflictError, PermissionDeniedError, ValidationError
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -23,12 +23,18 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 async def register(
     data: UserCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.admin)),
+    current_user: User = Depends(require_roles(UserRole.super_admin, UserRole.sub_admin)),
 ):
     try:
-        return await auth_service.register_user(db, data)
+        return await user_service.create_user_scoped(db, data, current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
 
 
 @router.post("/login", response_model=TokenResponse)

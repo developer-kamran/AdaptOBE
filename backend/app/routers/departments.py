@@ -11,7 +11,7 @@ from app.services.exceptions import ConflictError, NotFoundError
 router = APIRouter(
     prefix="/api/v1/admin/departments",
     tags=["admin-departments"],
-    dependencies=[Depends(require_roles(UserRole.admin))],
+    dependencies=[Depends(require_roles(UserRole.super_admin))],
 )
 
 

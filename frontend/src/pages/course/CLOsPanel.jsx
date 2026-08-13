@@ -1,19 +1,26 @@
 import { useEffect, useState } from 'react'
-import { createClo, listClos } from '../../api/clos'
+import { createClo, deleteClo, listClos, updateClo } from '../../api/clos'
 import { ApiError } from '../../api/client'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
 import Textarea from '../../components/ui/Textarea'
+import Select from '../../components/ui/Select'
 import Modal, { ModalFooter } from '../../components/ui/Modal'
 import Spinner from '../../components/ui/Spinner'
 import { Table, THead, TH, TBody, TR, TD } from '../../components/ui/Table'
 import EmptyState from '../../components/ui/EmptyState'
 import MappingModal from './MappingModal'
 
+//: Standard Bloom's Taxonomy (cognitive domain) levels -- must match
+//: `BLOOM_LEVELS` in `backend/app/schemas/clo.py`.
+const BLOOM_LEVELS = ['Remember', 'Understand', 'Apply', 'Analyze', 'Evaluate', 'Create']
+
 export default function CLOsPanel({ course }) {
   const [clos, setClos] = useState(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [editingClo, setEditingClo] = useState(null)
   const [mappingClo, setMappingClo] = useState(null)
+  const [error, setError] = useState('')
 
   const load = () => listClos(course.id).then(setClos)
 
@@ -22,14 +29,29 @@ export default function CLOsPanel({ course }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [course.id])
 
+  async function handleDelete(clo) {
+    if (!window.confirm(`Delete CLO "${clo.code}"? This also removes its PLO mappings.`)) return
+    setError('')
+    try {
+      await deleteClo(clo.id)
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
+    }
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <p className="text-sm text-ink-500">Course Learning Outcomes for {course.code}.</p>
-        <Button size="sm" onClick={() => setIsCreateOpen(true)}>
+        <Button size="sm" onClick={() => setIsCreateOpen(true)} className="self-start sm:self-auto">
           + Add CLO
         </Button>
       </div>
+
+      {error && (
+        <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2 mb-4">{error}</p>
+      )}
 
       {clos === null ? (
         <div className="flex justify-center py-12">
@@ -60,9 +82,17 @@ export default function CLOsPanel({ course }) {
                 </TD>
                 <TD className="text-ink-500">{clo.bloom_level || '—'}</TD>
                 <TD>
-                  <Button variant="secondary" size="sm" onClick={() => setMappingClo(clo)}>
-                    Map to PLOs
-                  </Button>
+                  <div className="flex items-center justify-end gap-1">
+                    <Button variant="secondary" size="sm" onClick={() => setMappingClo(clo)}>
+                      Map to PLOs
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setEditingClo(clo)}>
+                      Edit
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(clo)}>
+                      Delete
+                    </Button>
+                  </div>
                 </TD>
               </TR>
             ))}
@@ -70,11 +100,20 @@ export default function CLOsPanel({ course }) {
         </Table>
       )}
 
-      <CreateCloModal
+      <CloFormModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}
-        onCreated={load}
+        onSaved={load}
         courseId={course.id}
+        mode="create"
+      />
+      <CloFormModal
+        isOpen={editingClo !== null}
+        onClose={() => setEditingClo(null)}
+        onSaved={load}
+        courseId={course.id}
+        mode="edit"
+        clo={editingClo}
       />
 
       {mappingClo && (
@@ -84,7 +123,7 @@ export default function CLOsPanel({ course }) {
   )
 }
 
-function CreateCloModal({ isOpen, onClose, onCreated, courseId }) {
+function CloFormModal({ isOpen, onClose, onSaved, courseId, mode, clo }) {
   const [code, setCode] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -92,28 +131,29 @@ function CreateCloModal({ isOpen, onClose, onCreated, courseId }) {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  function reset() {
-    setCode('')
-    setTitle('')
-    setDescription('')
-    setBloomLevel('')
-    setError('')
-  }
+  useEffect(() => {
+    if (isOpen) {
+      setCode(clo?.code ?? '')
+      setTitle(clo?.title ?? '')
+      setDescription(clo?.description ?? '')
+      setBloomLevel(clo?.bloom_level ?? '')
+      setError('')
+    }
+  }, [isOpen, clo])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setIsSubmitting(true)
     try {
-      await createClo(courseId, {
-        code,
-        title,
-        description,
-        bloom_level: bloomLevel || undefined,
-      })
-      reset()
+      const data = { code, title, description, bloom_level: bloomLevel }
+      if (mode === 'edit') {
+        await updateClo(clo.id, data)
+      } else {
+        await createClo(courseId, data)
+      }
       onClose()
-      onCreated()
+      onSaved()
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
     } finally {
@@ -122,7 +162,11 @@ function CreateCloModal({ isOpen, onClose, onCreated, courseId }) {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Course Learning Outcome">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={mode === 'edit' ? 'Edit Course Learning Outcome' : 'Add Course Learning Outcome'}
+    >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <Input
           label="Code"
@@ -146,12 +190,21 @@ function CreateCloModal({ isOpen, onClose, onCreated, courseId }) {
           onChange={(e) => setDescription(e.target.value)}
           required
         />
-        <Input
-          label="Bloom Level (optional)"
-          placeholder="Apply"
+        <Select
+          label="Bloom Level"
           value={bloomLevel}
           onChange={(e) => setBloomLevel(e.target.value)}
-        />
+          required
+        >
+          <option value="" disabled>
+            Select a Bloom level…
+          </option>
+          {BLOOM_LEVELS.map((level) => (
+            <option key={level} value={level}>
+              {level}
+            </option>
+          ))}
+        </Select>
         <p className="text-xs text-ink-500 -mt-2">
           A 384-dimensional embedding is generated automatically for AI-powered PLO mapping.
         </p>
@@ -161,7 +214,7 @@ function CreateCloModal({ isOpen, onClose, onCreated, courseId }) {
             Cancel
           </Button>
           <Button type="submit" isLoading={isSubmitting}>
-            Create
+            {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
         </ModalFooter>
       </form>

@@ -28,13 +28,13 @@ export default function CourseDetailPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-6 flex flex-col gap-5">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:px-6 sm:py-6 flex flex-col gap-5">
         <div>
           <Link to="/courses" className="text-xs text-brand-600 hover:text-brand-700 font-medium">
             ← My Courses
           </Link>
           {course ? (
-            <div className="flex items-center justify-between mt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mt-1">
               <div>
                 <h1 className="text-xl font-semibold text-ink-900">
                   {course.code} — {course.name}
@@ -46,7 +46,7 @@ export default function CourseDetailPage() {
               <button
                 type="button"
                 onClick={() => navigate('/dashboard')}
-                className="text-sm font-medium text-brand-600 hover:text-brand-700"
+                className="text-sm font-medium text-brand-600 hover:text-brand-700 text-left sm:text-right shrink-0"
               >
                 View Attainment Dashboard →
               </button>

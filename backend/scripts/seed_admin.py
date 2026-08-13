@@ -21,7 +21,9 @@ engine.echo = False
 async def seed_admin(email: str, password: str, full_name: str) -> int:
     """Returns a process exit code: 0 on success or benign skip, 1 on bad input."""
     try:
-        data = UserCreate(email=email, password=password, full_name=full_name, role=UserRole.admin)
+        data = UserCreate(
+            email=email, password=password, full_name=full_name, role=UserRole.super_admin
+        )
     except ValidationError as exc:
         # A raw pydantic traceback is poor UX for a command people run by hand.
         for error in exc.errors():
@@ -35,12 +37,14 @@ async def seed_admin(email: str, password: str, full_name: str) -> int:
         except ConflictError as exc:
             print(f"Skipped: {exc}")
             return 0
-        print(f"Created admin user: {user.email} (id={user.id})")
+        print(f"Created super admin user: {user.email} (id={user.id})")
         return 0
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Bootstrap the first admin user for AdaptOBE.")
+    parser = argparse.ArgumentParser(
+        description="Bootstrap the first super_admin user for AdaptOBE."
+    )
     parser.add_argument("--email", required=True)
     parser.add_argument("--password", required=True)
     parser.add_argument("--full-name", required=True, dest="full_name")

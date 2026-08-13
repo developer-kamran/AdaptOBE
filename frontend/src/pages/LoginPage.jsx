@@ -19,8 +19,14 @@ export default function LoginPage() {
     setError('')
     setIsSubmitting(true)
     try {
-      await login(email, password)
-      navigate('/dashboard', { replace: true })
+      const user = await login(email, password)
+      const destination =
+        user?.role === 'super_admin' || user?.role === 'sub_admin'
+          ? '/admin'
+          : user?.role === 'faculty'
+            ? '/dashboard'
+            : '/courses'
+      navigate(destination, { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Something went wrong. Please try again.')
     } finally {

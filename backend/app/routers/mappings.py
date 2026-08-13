@@ -20,14 +20,16 @@ from app.services.exceptions import (
 
 router = APIRouter(prefix="/api/v1/mappings", tags=["mappings"])
 
-FacultyOrAdmin = Depends(require_roles(UserRole.faculty, UserRole.admin))
+# CLO-PLO mapping is a faculty-operational concern -- neither admin tier
+# touches it, per the admin-hierarchy redesign.
+FacultyOnly = Depends(require_roles(UserRole.faculty))
 
 
 @router.post("/suggest", response_model=MappingSuggestResponse)
 async def suggest(
     data: MappingSuggestRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         suggestions = await mapping_service.suggest_plos(
@@ -49,7 +51,7 @@ async def suggest(
 async def confirm(
     data: MappingConfirmRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         return await mapping_service.confirm_mapping(db, data, current_user)
@@ -69,7 +71,7 @@ async def confirm(
 async def list_for_clo(
     clo_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         return await mapping_service.list_mappings_for_clo(db, clo_id, current_user)
@@ -83,7 +85,7 @@ async def list_for_clo(
 async def delete_mapping(
     mapping_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         await mapping_service.delete_mapping(db, mapping_id, current_user)

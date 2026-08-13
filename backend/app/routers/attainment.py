@@ -12,7 +12,9 @@ from app.services.exceptions import NotFoundError, PermissionDeniedError
 
 router = APIRouter(prefix="/api/v1/attainment", tags=["attainment"])
 
-FacultyOrAdmin = Depends(require_roles(UserRole.faculty, UserRole.admin))
+# Gradebook/reporting is a faculty-operational concern -- neither admin tier
+# (super_admin or sub_admin) touches it, per the admin-hierarchy redesign.
+FacultyOnly = Depends(require_roles(UserRole.faculty))
 
 
 async def _course_for_user(db: AsyncSession, course_id: int, user: User) -> Course:
@@ -28,7 +30,7 @@ async def _course_for_user(db: AsyncSession, course_id: int, user: User) -> Cour
 async def course_attainment(
     course_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     await _course_for_user(db, course_id, current_user)
     return await attainment_service.build_course_report(db, course_id)
@@ -38,7 +40,7 @@ async def course_attainment(
 async def recalculate(
     course_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     await _course_for_user(db, course_id, current_user)
     await attainment_service.recalculate_course_attainment(db, course_id)
@@ -52,7 +54,7 @@ async def student_attainment(
     course_id: int,
     student_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     await _course_for_user(db, course_id, current_user)
     return await attainment_service.build_student_report(db, course_id, student_id)
@@ -62,7 +64,7 @@ async def student_attainment(
 async def export_pdf(
     course_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     course = await _course_for_user(db, course_id, current_user)
     report = await attainment_service.build_course_report(db, course_id)
@@ -81,7 +83,7 @@ async def export_pdf(
 async def export_excel(
     course_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     course = await _course_for_user(db, course_id, current_user)
     report = await attainment_service.build_course_report(db, course_id)

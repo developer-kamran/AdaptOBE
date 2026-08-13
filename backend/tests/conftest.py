@@ -113,10 +113,14 @@ def stub_encoder(monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def program(db_session):
-    department = await department_service.create_department(
+async def department(db_session):
+    return await department_service.create_department(
         db_session, DepartmentCreate(name="Computer Science", code="CS-TEST")
     )
+
+
+@pytest_asyncio.fixture
+async def program(db_session, department):
     return await program_service.create_program(
         db_session,
         ProgramCreate(
@@ -125,12 +129,33 @@ async def program(db_session):
             name="BS Computer Science",
             total_semesters=8,
         ),
+        # create_program only branches on role == sub_admin (to force
+        # dept_id); anything else passes data.dept_id through untouched, so
+        # an unpersisted stand-in is enough here.
+        current_user=User(role=UserRole.faculty),
     )
 
 
 @pytest_asyncio.fixture
 async def faculty(make_user):
-    return await make_user("faculty.owner@adaptobe.edu", role=UserRole.faculty)
+    return await make_user(
+        "faculty.owner@adaptobe.edu", role=UserRole.faculty, employee_id="FAC-OWNER"
+    )
+
+
+@pytest_asyncio.fixture
+async def super_admin(make_user):
+    return await make_user("super.admin@adaptobe.edu", role=UserRole.super_admin)
+
+
+@pytest_asyncio.fixture
+async def sub_admin(make_user, department):
+    return await make_user(
+        "sub.admin@adaptobe.edu",
+        role=UserRole.sub_admin,
+        dept_id=department.id,
+        employee_id="EMP-1",
+    )
 
 
 @pytest_asyncio.fixture
@@ -159,6 +184,9 @@ async def make_plo(db_session, program):
                 title=title,
                 description=description,
             ),
+            # create_plo only branches on role == sub_admin (to enforce dept
+            # scoping); an unpersisted faculty stand-in is enough here.
+            current_user=User(role=UserRole.faculty),
         )
 
     return _make_plo
@@ -166,11 +194,17 @@ async def make_plo(db_session, program):
 
 @pytest_asyncio.fixture
 async def make_clo(db_session, course, faculty):
-    async def _make_clo(code: str, title: str, description: str, course_id: int | None = None):
+    async def _make_clo(
+        code: str,
+        title: str,
+        description: str,
+        course_id: int | None = None,
+        bloom_level: str = "Apply",
+    ):
         return await clo_service.create_clo(
             db_session,
             course_id if course_id is not None else course.id,
-            CLOCreate(code=code, title=title, description=description),
+            CLOCreate(code=code, title=title, description=description, bloom_level=bloom_level),
             faculty,
         )
 
@@ -180,6 +214,9 @@ async def make_clo(db_session, course, faculty):
 @pytest_asyncio.fixture
 async def make_student(make_user):
     async def _make_student(suffix: str, **kwargs):
+        kwargs.setdefault("enrollment_no", f"ENR-{suffix}")
+        kwargs.setdefault("seat_no", f"SEAT-{suffix}")
+        kwargs.setdefault("father_name", f"Father {suffix}")
         return await make_user(
             f"student.{suffix}@adaptobe.edu",
             full_name=f"Student {suffix}",
@@ -234,7 +271,7 @@ async def make_question(db_session, faculty):
         question_number: int,
         marks: float,
         clo_id: int | None = None,
-        text: str | None = None,
+        text: str = "Placeholder question text.",
     ):
         return await question_service.create_question(
             db_session,

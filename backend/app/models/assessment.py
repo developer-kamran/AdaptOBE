@@ -12,6 +12,7 @@ class AssessmentType(str, enum.Enum):
     quiz = "quiz"
     assignment = "assignment"
     lab = "lab"
+    project = "project"
     midterm = "midterm"
     final = "final"
 
