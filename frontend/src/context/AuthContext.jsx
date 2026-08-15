@@ -14,9 +14,11 @@ export function AuthProvider({ children }) {
     try {
       const currentUser = await apiFetch('/api/v1/auth/me')
       setUser(currentUser)
+      return currentUser
     } catch {
       clearTokens()
       setUser(null)
+      return null
     }
   }, [])
 
@@ -33,7 +35,7 @@ export function AuthProvider({ children }) {
     async (email, password) => {
       const tokens = await loginRequest(email, password)
       setTokens(tokens)
-      await loadCurrentUser()
+      return loadCurrentUser()
     },
     [loadCurrentUser],
   )

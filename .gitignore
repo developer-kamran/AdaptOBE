@@ -14,6 +14,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.vite/
 
+
 ## OS / editor
 .DS_Store
 .vscode/
@@ -21,3 +22,5 @@ frontend/.vite/
 
 ## Claude Code local session files
 .claude/
+
+credentials.txt

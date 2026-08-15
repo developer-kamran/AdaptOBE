@@ -21,7 +21,7 @@ export default function Modal({ isOpen, onClose, title, description, children, w
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-border shrink-0">
+        <div className="flex items-start justify-between gap-4 px-4 py-4 sm:px-5 border-b border-border shrink-0">
           <div>
             <h2 className="text-sm font-semibold text-ink-900">{title}</h2>
             {description && <p className="mt-0.5 text-xs text-ink-500">{description}</p>}
@@ -29,7 +29,7 @@ export default function Modal({ isOpen, onClose, title, description, children, w
           <button
             type="button"
             onClick={onClose}
-            className="text-ink-400 hover:text-ink-700 rounded-md p-1 -m-1"
+            className="text-ink-400 hover:text-ink-700 rounded-md p-1 -m-1 shrink-0"
             aria-label="Close"
           >
             <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -37,7 +37,7 @@ export default function Modal({ isOpen, onClose, title, description, children, w
             </svg>
           </button>
         </div>
-        <div className="p-5 overflow-y-auto">{children}</div>
+        <div className="p-4 sm:p-5 overflow-y-auto">{children}</div>
       </div>
     </div>
   )

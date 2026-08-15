@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { listPrograms } from '../../api/admin'
-import { createPlo, listPlos } from '../../api/plos'
+import { createPlo, deletePlo, listPlos, updatePlo } from '../../api/plos'
 import { ApiError } from '../../api/client'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
@@ -12,11 +12,15 @@ import Badge from '../../components/ui/Badge'
 import { Table, THead, TH, TBody, TR, TD } from '../../components/ui/Table'
 import EmptyState from '../../components/ui/EmptyState'
 
+const BLOOM_DOMAINS = ['Cognitive', 'Psychomotor', 'Affective']
+
 export default function PLOsPanel() {
   const [programs, setPrograms] = useState([])
   const [selectedProgramId, setSelectedProgramId] = useState('')
   const [plos, setPlos] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [error, setError] = useState('')
 
   useEffect(() => {
     listPrograms().then((data) => {
@@ -34,10 +38,21 @@ export default function PLOsPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProgramId])
 
+  async function handleDelete(plo) {
+    if (!window.confirm(`Delete PLO "${plo.code}"? This cannot be undone.`)) return
+    setError('')
+    try {
+      await deletePlo(plo.id)
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
+    }
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 gap-3">
-        <div className="w-64">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-3">
+        <div className="w-full sm:w-64">
           <Select value={selectedProgramId} onChange={(e) => setSelectedProgramId(e.target.value)}>
             {programs.map((program) => (
               <option key={program.id} value={program.id}>
@@ -46,10 +61,19 @@ export default function PLOsPanel() {
             ))}
           </Select>
         </div>
-        <Button size="sm" onClick={() => setIsModalOpen(true)} disabled={!selectedProgramId}>
+        <Button
+          size="sm"
+          onClick={() => setIsModalOpen(true)}
+          disabled={!selectedProgramId}
+          className="self-start sm:self-auto"
+        >
           + Add PLO
         </Button>
       </div>
+
+      {error && (
+        <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2 mb-4">{error}</p>
+      )}
 
       {plos === null ? (
         <div className="flex justify-center py-12">
@@ -64,6 +88,7 @@ export default function PLOsPanel() {
               <TH>Code</TH>
               <TH>Title</TH>
               <TH>Domain</TH>
+              <TH></TH>
             </TR>
           </THead>
           <TBody>
@@ -75,23 +100,39 @@ export default function PLOsPanel() {
                   <p className="text-xs text-ink-500 mt-0.5 max-w-xl">{plo.description}</p>
                 </TD>
                 <TD>{plo.domain && <Badge tone="brand">{plo.domain}</Badge>}</TD>
+                <TD className="text-right whitespace-nowrap">
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(plo)}>
+                    Edit
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(plo)}>
+                    Delete
+                  </Button>
+                </TD>
               </TR>
             ))}
           </TBody>
         </Table>
       )}
 
-      <CreatePloModal
+      <PloModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onCreated={load}
+        onSaved={load}
+        mode="create"
         programId={selectedProgramId}
+      />
+      <PloModal
+        isOpen={editing !== null}
+        onClose={() => setEditing(null)}
+        onSaved={load}
+        mode="edit"
+        plo={editing}
       />
     </div>
   )
 }
 
-function CreatePloModal({ isOpen, onClose, onCreated, programId }) {
+function PloModal({ isOpen, onClose, onSaved, mode, programId, plo }) {
   const [code, setCode] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -99,29 +140,29 @@ function CreatePloModal({ isOpen, onClose, onCreated, programId }) {
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  function reset() {
-    setCode('')
-    setTitle('')
-    setDescription('')
-    setDomain('')
-    setError('')
-  }
+  useEffect(() => {
+    if (isOpen) {
+      setCode(plo?.code ?? '')
+      setTitle(plo?.title ?? '')
+      setDescription(plo?.description ?? '')
+      setDomain(plo?.domain ?? '')
+      setError('')
+    }
+  }, [isOpen, plo])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setIsSubmitting(true)
     try {
-      await createPlo({
-        program_id: Number(programId),
-        code,
-        title,
-        description,
-        domain: domain || undefined,
-      })
-      reset()
+      const data = { code, title, description, domain: domain || undefined }
+      if (mode === 'edit') {
+        await updatePlo(plo.id, data)
+      } else {
+        await createPlo({ program_id: Number(programId), ...data })
+      }
       onClose()
-      onCreated()
+      onSaved()
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
     } finally {
@@ -130,7 +171,11 @@ function CreatePloModal({ isOpen, onClose, onCreated, programId }) {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Programme Learning Outcome">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title={mode === 'edit' ? 'Edit Programme Learning Outcome' : 'Add Programme Learning Outcome'}
+    >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <Input
           label="Code"
@@ -154,12 +199,14 @@ function CreatePloModal({ isOpen, onClose, onCreated, programId }) {
           onChange={(e) => setDescription(e.target.value)}
           required
         />
-        <Input
-          label="Bloom Domain (optional)"
-          placeholder="Cognitive"
-          value={domain}
-          onChange={(e) => setDomain(e.target.value)}
-        />
+        <Select label="Bloom Domain" value={domain} onChange={(e) => setDomain(e.target.value)}>
+          <option value="">— None —</option>
+          {BLOOM_DOMAINS.map((value) => (
+            <option key={value} value={value}>
+              {value}
+            </option>
+          ))}
+        </Select>
         <p className="text-xs text-ink-500 -mt-2">
           A 384-dimensional embedding is generated automatically for AI-powered CLO mapping.
         </p>
@@ -169,7 +216,7 @@ function CreatePloModal({ isOpen, onClose, onCreated, programId }) {
             Cancel
           </Button>
           <Button type="submit" isLoading={isSubmitting}>
-            Create
+            {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
         </ModalFooter>
       </form>

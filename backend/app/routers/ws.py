@@ -52,13 +52,13 @@ async def course_updates(websocket: WebSocket, course_id: int, token: str | None
 
     Clients connect with `?token=<access_token>`; the connection is refused
     (matching the REST endpoints' RBAC) if the token is missing/invalid, the
-    role isn't faculty/admin, or a faculty user doesn't own the course.
+    role isn't faculty, or the faculty user doesn't own the course.
     """
     user = await _authenticate(token)
     if user is None:
         await websocket.close(code=POLICY_VIOLATION)
         return
-    if user.role not in (UserRole.faculty, UserRole.admin):
+    if user.role != UserRole.faculty:
         await websocket.close(code=POLICY_VIOLATION)
         return
 

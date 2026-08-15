@@ -14,7 +14,7 @@ Built as a Final Year Project for the Department of Computer Science, UBIT (Umae
 - **Direct attainment engine.** Turns raw scores into CLO/PLO attainment percentages, with every edge case handled explicitly: absent students count as zero (not excluded), zero-denominator CLOs return 0.00% instead of crashing, and every score edit triggers an automatic recalculation.
 - **Real-time faculty dashboard.** A CLO × PLO heatmap that updates live over WebSockets — enter a score in one tab, watch the dashboard update in another with no refresh.
 - **One-click reporting.** PDF and Excel export of the full attainment report, styled to match the dashboard.
-- **Role-based access control** end to end — Admin, Faculty, and Student scopes enforced on every API endpoint, not just hidden in the UI.
+- **Role-based access control** end to end — Super Admin, Sub-Admin (department-scoped), Faculty, and Student scopes enforced on every API endpoint, not just hidden in the UI. See [CHANGELOG.md](CHANGELOG.md) for the admin-hierarchy redesign.
 
 ## Tech stack
 

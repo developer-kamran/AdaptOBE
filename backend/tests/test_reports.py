@@ -6,7 +6,7 @@ from tests.conftest import auth_header
 
 
 async def test_export_pdf_requires_course_access(client, make_user, course):
-    other = await make_user("faculty.export@adaptobe.edu", role="faculty")
+    other = await make_user("faculty.export@adaptobe.edu", role="faculty", employee_id="FAC-EXPORT")
     resp = await client.get(
         f"/api/v1/attainment/course/{course.id}/export/pdf", headers=auth_header(other)
     )

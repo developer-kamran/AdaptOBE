@@ -2,7 +2,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ProgramCreate(BaseModel):
-    dept_id: int
+    # Optional: the only caller who can create a programme is a sub_admin,
+    # and the service always forces this to their own department regardless
+    # of what's sent here.
+    dept_id: int | None = None
     code: str = Field(min_length=1, max_length=50)
     name: str = Field(min_length=1, max_length=255)
     total_semesters: int = Field(gt=0)

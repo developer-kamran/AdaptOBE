@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { createDepartment, listDepartments } from '../../api/admin'
+import { createDepartment, deleteDepartment, listDepartments, updateDepartment } from '../../api/admin'
 import { ApiError } from '../../api/client'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
@@ -11,6 +11,8 @@ import EmptyState from '../../components/ui/EmptyState'
 export default function DepartmentsPanel() {
   const [departments, setDepartments] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [error, setError] = useState('')
 
   const load = () => listDepartments().then(setDepartments)
 
@@ -18,14 +20,29 @@ export default function DepartmentsPanel() {
     load()
   }, [])
 
+  async function handleDelete(dept) {
+    if (!window.confirm(`Delete department "${dept.name}"? This cannot be undone.`)) return
+    setError('')
+    try {
+      await deleteDepartment(dept.id)
+      load()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
+    }
+  }
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <p className="text-sm text-ink-500">Academic departments in the institution.</p>
-        <Button size="sm" onClick={() => setIsModalOpen(true)}>
+        <Button size="sm" onClick={() => setIsModalOpen(true)} className="self-start sm:self-auto">
           + Add Department
         </Button>
       </div>
+
+      {error && (
+        <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2 mb-4">{error}</p>
+      )}
 
       {departments === null ? (
         <div className="flex justify-center py-12">
@@ -39,6 +56,7 @@ export default function DepartmentsPanel() {
             <TR>
               <TH>Code</TH>
               <TH>Name</TH>
+              <TH></TH>
             </TR>
           </THead>
           <TBody>
@@ -46,42 +64,63 @@ export default function DepartmentsPanel() {
               <TR key={dept.id}>
                 <TD className="font-medium">{dept.code}</TD>
                 <TD>{dept.name}</TD>
+                <TD className="text-right whitespace-nowrap">
+                  <Button variant="ghost" size="sm" onClick={() => setEditing(dept)}>
+                    Edit
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(dept)}>
+                    Delete
+                  </Button>
+                </TD>
               </TR>
             ))}
           </TBody>
         </Table>
       )}
 
-      <CreateDepartmentModal
+      <DepartmentModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        onCreated={load}
+        onSaved={load}
+        mode="create"
+      />
+      <DepartmentModal
+        isOpen={editing !== null}
+        onClose={() => setEditing(null)}
+        onSaved={load}
+        mode="edit"
+        department={editing}
       />
     </div>
   )
 }
 
-function CreateDepartmentModal({ isOpen, onClose, onCreated }) {
+function DepartmentModal({ isOpen, onClose, onSaved, mode, department }) {
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  function reset() {
-    setName('')
-    setCode('')
-    setError('')
-  }
+  useEffect(() => {
+    if (isOpen) {
+      setName(department?.name ?? '')
+      setCode(department?.code ?? '')
+      setError('')
+    }
+  }, [isOpen, department])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setIsSubmitting(true)
     try {
-      await createDepartment({ name, code })
-      reset()
+      if (mode === 'edit') {
+        await updateDepartment(department.id, { name, code })
+      } else {
+        await createDepartment({ name, code })
+      }
       onClose()
-      onCreated()
+      onSaved()
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Something went wrong.')
     } finally {
@@ -90,7 +129,7 @@ function CreateDepartmentModal({ isOpen, onClose, onCreated }) {
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Department">
+    <Modal isOpen={isOpen} onClose={onClose} title={mode === 'edit' ? 'Edit Department' : 'Add Department'}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <Input
           label="Department Name"
@@ -112,7 +151,7 @@ function CreateDepartmentModal({ isOpen, onClose, onCreated }) {
             Cancel
           </Button>
           <Button type="submit" isLoading={isSubmitting}>
-            Create
+            {mode === 'edit' ? 'Save' : 'Create'}
           </Button>
         </ModalFooter>
       </form>

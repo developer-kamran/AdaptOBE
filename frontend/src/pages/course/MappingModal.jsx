@@ -2,19 +2,23 @@ import { useEffect, useMemo, useState } from 'react'
 import { listPlos } from '../../api/plos'
 import { confirmMapping, deleteMapping, listMappingsForClo, suggestMappings } from '../../api/mappings'
 import { ApiError } from '../../api/client'
+import { similarityLabel, strengthFromSimilarity } from '../../utils/similarity'
 import Button from '../../components/ui/Button'
 import Modal from '../../components/ui/Modal'
 import Spinner from '../../components/ui/Spinner'
 import Badge from '../../components/ui/Badge'
+import InfoTooltip from '../../components/ui/InfoTooltip'
 
 const STRENGTH_LABEL = { 1: 'Weak', 2: 'Moderate', 3: 'Strong' }
 
-// A sensible default strength from cosine similarity, so faculty aren't stuck
-// picking a number blind -- they can still override it before confirming.
-function strengthFromSimilarity(score) {
-  if (score >= 0.5) return 3
-  if (score >= 0.3) return 2
-  return 1
+function AiInfo({ score }) {
+  return (
+    <InfoTooltip>
+      AI compares the wording of this CLO with each Programme Learning Outcome using
+      semantic similarity, then labels the match Strong, Moderate, or Weak based on that
+      score. Underlying similarity score: <strong>{score.toFixed(3)}</strong>.
+    </InfoTooltip>
+  )
 }
 
 export default function MappingModal({ clo, onClose }) {
@@ -101,23 +105,26 @@ export default function MappingModal({ clo, onClose }) {
                 return (
                   <div
                     key={mapping.id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border px-3 py-2"
                   >
                     <div>
                       <p className="text-sm font-medium text-ink-900">
                         {plo?.code ?? `PLO #${mapping.plo_id}`} — {plo?.title}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-1">
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
                         <Badge tone="brand">{STRENGTH_LABEL[mapping.strength]}</Badge>
                         {mapping.is_ai_generated && <Badge tone="neutral">AI-suggested</Badge>}
                         {mapping.similarity_score != null && (
-                          <span className="text-xs text-ink-400">
-                            similarity {mapping.similarity_score.toFixed(2)}
-                          </span>
+                          <AiInfo score={mapping.similarity_score} />
                         )}
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => handleDelete(mapping.id)}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDelete(mapping.id)}
+                      className="self-start sm:self-auto"
+                    >
                       Remove
                     </Button>
                   </div>
@@ -128,11 +135,17 @@ export default function MappingModal({ clo, onClose }) {
         </section>
 
         <section>
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
             <h3 className="text-xs font-semibold text-ink-500 uppercase tracking-wide">
               AI-Suggested Matches
             </h3>
-            <Button variant="secondary" size="sm" onClick={handleSuggest} isLoading={isSuggesting}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleSuggest}
+              isLoading={isSuggesting}
+              className="self-start sm:self-auto"
+            >
               {suggestions ? 'Refresh Suggestions' : 'Get AI Suggestions'}
             </Button>
           </div>
@@ -141,33 +154,35 @@ export default function MappingModal({ clo, onClose }) {
             <div className="flex flex-col gap-2">
               {suggestions
                 .filter((s) => !confirmedPloIds.has(s.plo_id))
-                .map((suggestion) => (
-                  <div
-                    key={suggestion.plo_id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2 bg-slate-50"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-ink-900">
-                        {suggestion.code} — {suggestion.title}
-                      </p>
-                      <p className="text-xs text-ink-500 mt-0.5">
-                        cosine similarity{' '}
-                        <span className="font-mono font-medium text-brand-700">
-                          {suggestion.similarity_score.toFixed(3)}
-                        </span>
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      isLoading={confirmingPloId === suggestion.plo_id}
-                      onClick={() =>
-                        handleConfirm(suggestion, strengthFromSimilarity(suggestion.similarity_score))
-                      }
+                .map((suggestion) => {
+                  const { label, tone } = similarityLabel(suggestion.similarity_score)
+                  return (
+                    <div
+                      key={suggestion.plo_id}
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-border px-3 py-2 bg-slate-50"
                     >
-                      Confirm as {STRENGTH_LABEL[strengthFromSimilarity(suggestion.similarity_score)]}
-                    </Button>
-                  </div>
-                ))}
+                      <div>
+                        <p className="text-sm font-medium text-ink-900">
+                          {suggestion.code} — {suggestion.title}
+                        </p>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                          <Badge tone={tone}>{label} match</Badge>
+                          <AiInfo score={suggestion.similarity_score} />
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        isLoading={confirmingPloId === suggestion.plo_id}
+                        onClick={() =>
+                          handleConfirm(suggestion, strengthFromSimilarity(suggestion.similarity_score))
+                        }
+                        className="self-start sm:self-auto"
+                      >
+                        Confirm as {STRENGTH_LABEL[strengthFromSimilarity(suggestion.similarity_score)]}
+                      </Button>
+                    </div>
+                  )
+                })}
               {suggestions.filter((s) => !confirmedPloIds.has(s.plo_id)).length === 0 && (
                 <p className="text-sm text-ink-400">All top suggestions are already confirmed.</p>
               )}

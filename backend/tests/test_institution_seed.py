@@ -9,17 +9,16 @@ import sys
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 
 from app.core import institution
 from app.ml import embeddings
-from app.models.department import Department
 from app.models.plo import PLO
 from app.models.program import Program
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
+import seed_ubit_data  # noqa: E402
 from seed_ubit_data import _upsert_department, _upsert_plos, _upsert_programs  # noqa: E402
 
 EXPECTED_PROGRAM_CODES = {"BSSE", "BSCS", "BSAI", "BSDS"}
@@ -63,51 +62,45 @@ class TestInstitutionConstants:
             institution.STANDARD_PLOS[0].title = "changed"
 
 
-@pytest_asyncio.fixture
-async def clean_institution(db_session):
-    """Remove any already-seeded UBIT rows inside the test transaction.
+@pytest.fixture
+def fake_institution(monkeypatch):
+    """Point the seed script at isolated, test-only department/programme codes
+    instead of the real UBIT ones.
 
-    A developer's database will normally have the real seed applied, which would
-    otherwise make "created" counts depend on whether the script had been run.
-    The surrounding fixture rolls this back, so live data is untouched.
+    A developer's database normally has the real seed applied *and* real data
+    (courses, students, ...) attached to those real programme rows -- deleting
+    them to get a "clean slate" (the previous approach) fails with a foreign
+    key violation once anything references them. Operating on codes that can
+    never collide with real data sidesteps the problem entirely: these tests
+    only need to exercise the upsert *logic*, not the real institutional rows,
+    and the transactional `db_session` rolls everything back regardless.
     """
-    department = (
-        await db_session.execute(
-            select(Department).where(Department.code == institution.DEPARTMENT_CODE)
+    fake_department_code = "UBIT-TEST"
+    fake_programs = tuple(
+        institution.ProgramSpec(
+            code=f"{fake_department_code}-{spec.code}",
+            name=spec.name,
+            total_semesters=spec.total_semesters,
         )
-    ).scalar_one_or_none()
+        for spec in institution.PROGRAMS
+    )
 
-    if department is not None:
-        program_ids = list(
-            (
-                await db_session.execute(
-                    select(Program.id).where(Program.dept_id == department.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if program_ids:
-            # plos -> programs -> departments: no ON DELETE cascade on these FKs.
-            await db_session.execute(delete(PLO).where(PLO.program_id.in_(program_ids)))
-            await db_session.execute(delete(Program).where(Program.id.in_(program_ids)))
-        await db_session.execute(
-            delete(Department).where(Department.id == department.id)
-        )
-        await db_session.flush()
+    monkeypatch.setattr(seed_ubit_data, "DEPARTMENT_CODE", fake_department_code)
+    monkeypatch.setattr(seed_ubit_data, "DEPARTMENT_NAME", "Test Department (isolated)")
+    monkeypatch.setattr(seed_ubit_data, "PROGRAMS", fake_programs)
 
-    return db_session
+    return {spec.code for spec in fake_programs}
 
 
-@pytest.mark.usefixtures("clean_institution")
+@pytest.mark.usefixtures("fake_institution")
 class TestSeed:
-    async def test_seed_creates_department_programs_and_all_plos(self, db_session):
+    async def test_seed_creates_department_programs_and_all_plos(self, db_session, fake_institution):
         department, status = await _upsert_department(db_session)
         assert status == "created"
 
         programs, counts = await _upsert_programs(db_session, department)
         assert counts["created"] == 4
-        assert set(programs) == EXPECTED_PROGRAM_CODES
+        assert set(programs) == fake_institution
 
         plo_counts = await _upsert_plos(db_session, programs, force_embeddings=False)
         assert plo_counts["created"] == 40  # 10 outcomes x 4 programmes
@@ -119,13 +112,14 @@ class TestSeed:
         )
         assert total.scalar() == 40
 
-    async def test_seeded_plos_have_384_dim_embeddings(self, db_session):
+    async def test_seeded_plos_have_384_dim_embeddings(self, db_session, fake_institution):
         department, _ = await _upsert_department(db_session)
         programs, _ = await _upsert_programs(db_session, department)
         await _upsert_plos(db_session, programs, force_embeddings=False)
 
+        any_code = next(iter(fake_institution))
         result = await db_session.execute(
-            select(PLO).where(PLO.program_id == programs["BSSE"].id)
+            select(PLO).where(PLO.program_id == programs[any_code].id)
         )
         plos = list(result.scalars().all())
 
@@ -134,7 +128,7 @@ class TestSeed:
             assert plo.embedding is not None, plo.code
             assert len(plo.embedding) == embeddings.EMBEDDING_DIM
 
-    async def test_re_running_the_seed_does_not_duplicate_rows(self, db_session):
+    async def test_re_running_the_seed_does_not_duplicate_rows(self, db_session, fake_institution):
         department, _ = await _upsert_department(db_session)
         programs, _ = await _upsert_programs(db_session, department)
         await _upsert_plos(db_session, programs, force_embeddings=False)
@@ -153,13 +147,14 @@ class TestSeed:
         )
         assert program_total.scalar() == 4
 
-    async def test_seed_repairs_edited_plo_wording(self, db_session):
+    async def test_seed_repairs_edited_plo_wording(self, db_session, fake_institution):
         department, _ = await _upsert_department(db_session)
         programs, _ = await _upsert_programs(db_session, department)
         await _upsert_plos(db_session, programs, force_embeddings=False)
 
+        any_code = next(iter(fake_institution))
         result = await db_session.execute(
-            select(PLO).where(PLO.program_id == programs["BSCS"].id, PLO.code == "PLO-1")
+            select(PLO).where(PLO.program_id == programs[any_code].id, PLO.code == "PLO-1")
         )
         plo = result.scalar_one()
         plo.description = "Drifted description that no longer matches the standard."
@@ -173,14 +168,14 @@ class TestSeed:
         await db_session.refresh(plo)
         assert plo.description == institution.STANDARD_PLOS[0].description
 
-    async def test_plos_are_scoped_per_program(self, db_session):
+    async def test_plos_are_scoped_per_program(self, db_session, fake_institution):
         """Each programme owns its own PLO rows, which keeps mapping suggestions
         scoped to a single programme."""
         department, _ = await _upsert_department(db_session)
         programs, _ = await _upsert_programs(db_session, department)
         await _upsert_plos(db_session, programs, force_embeddings=False)
 
-        for code in EXPECTED_PROGRAM_CODES:
+        for code in fake_institution:
             result = await db_session.execute(
                 select(func.count()).select_from(PLO).where(PLO.program_id == programs[code].id)
             )

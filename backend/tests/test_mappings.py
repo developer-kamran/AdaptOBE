@@ -60,6 +60,7 @@ async def test_suggest_only_returns_plos_from_same_program(
         ProgramCreate(
             dept_id=other_dept.id, code="BSEE-TEST", name="BS Electrical", total_semesters=8
         ),
+        current_user=faculty,
     )
 
     await make_plo("PLO-SAME", "Programming", "Write and debug computer programs.")
@@ -91,7 +92,9 @@ async def test_suggest_with_no_plos_returns_empty(client, faculty, make_clo):
 
 
 async def test_suggest_rejects_non_owner(client, make_user, make_clo):
-    other = await make_user("faculty.suggest@adaptobe.edu", role=UserRole.faculty)
+    other = await make_user(
+        "faculty.suggest@adaptobe.edu", role=UserRole.faculty, employee_id="FAC-SUGGEST"
+    )
     clo = await make_clo("CLO-1", "Outcome", "Some description text.")
     resp = await client.post(
         "/api/v1/mappings/suggest", json={"clo_id": clo.id}, headers=auth_header(other)
@@ -185,6 +188,7 @@ async def test_confirm_rejects_cross_program_mapping(
         ProgramCreate(
             dept_id=other_dept.id, code="BSME-TEST", name="BS Mechanical", total_semesters=8
         ),
+        current_user=faculty,
     )
     foreign_plo = await make_plo(
         "PLO-FOREIGN", "Thermo", "Apply thermodynamics.", program_id=other_program.id
@@ -200,7 +204,9 @@ async def test_confirm_rejects_cross_program_mapping(
 
 
 async def test_confirm_rejects_non_owner(client, make_user, make_plo, make_clo):
-    other = await make_user("faculty.confirm@adaptobe.edu", role=UserRole.faculty)
+    other = await make_user(
+        "faculty.confirm@adaptobe.edu", role=UserRole.faculty, employee_id="FAC-CONFIRM"
+    )
     plo = await make_plo("PLO-1", "Design", "Design software systems.")
     clo = await make_clo("CLO-1", "Design", "Design software systems.")
 
@@ -241,7 +247,13 @@ async def test_list_and_delete_mappings_for_clo(client, faculty, make_plo, make_
 
 
 async def test_suggest_rejects_students(client, make_user, make_clo):
-    student = await make_user("student.suggest@adaptobe.edu", role=UserRole.student)
+    student = await make_user(
+        "student.suggest@adaptobe.edu",
+        role=UserRole.student,
+        enrollment_no="ENR-SUGGEST",
+        seat_no="SEAT-SUGGEST",
+        father_name="Father Suggest",
+    )
     clo = await make_clo("CLO-1", "Outcome", "Some description.")
     resp = await client.post(
         "/api/v1/mappings/suggest", json={"clo_id": clo.id}, headers=auth_header(student)

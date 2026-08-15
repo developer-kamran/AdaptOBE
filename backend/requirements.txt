@@ -8,10 +8,13 @@ pydantic[email]
 python-dotenv
 pgvector
 python-jose[cryptography]
+cryptography
 bcrypt
 sentence-transformers
 reportlab
 openpyxl
+python-multipart
+pdfplumber
 
 pytest
 pytest-asyncio

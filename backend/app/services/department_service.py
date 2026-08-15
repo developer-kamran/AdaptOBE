@@ -3,6 +3,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.department import Department
+from app.models.program import Program
+from app.models.user import User, UserRole
 from app.schemas.department import DepartmentCreate, DepartmentUpdate
 from app.services.exceptions import ConflictError, NotFoundError
 
@@ -50,5 +52,26 @@ async def update_department(db: AsyncSession, department_id: int, data: Departme
 
 async def delete_department(db: AsyncSession, department_id: int) -> None:
     department = await get_department(db, department_id)
+
+    has_program = (
+        await db.execute(select(Program.id).where(Program.dept_id == department_id).limit(1))
+    ).scalar_one_or_none()
+    if has_program is not None:
+        raise ConflictError(
+            "This department still has programmes assigned to it and cannot be deleted"
+        )
+
+    has_sub_admin = (
+        await db.execute(
+            select(User.id)
+            .where(User.dept_id == department_id, User.role == UserRole.sub_admin)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if has_sub_admin is not None:
+        raise ConflictError(
+            "This department still has sub-admins assigned to it and cannot be deleted"
+        )
+
     await db.delete(department)
     await db.commit()

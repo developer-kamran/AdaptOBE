@@ -6,6 +6,8 @@ from app.core.dependencies import require_roles
 from app.models.user import User, UserRole
 from app.schemas.assessment import AssessmentCreate, AssessmentRead, AssessmentUpdate
 from app.schemas.question import (
+    QuestionBulkCreateRequest,
+    QuestionBulkCreateResponse,
     QuestionCreate,
     QuestionRead,
     QuestionUpdate,
@@ -20,11 +22,18 @@ from app.services import (
     question_service,
     score_service,
 )
-from app.services.exceptions import NotFoundError, PermissionDeniedError, ValidationError
+from app.services.exceptions import (
+    ConflictError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 
 router = APIRouter(prefix="/api/v1/assessments", tags=["assessments"])
 
-FacultyOrAdmin = Depends(require_roles(UserRole.faculty, UserRole.admin))
+# Assessments/scoring is a faculty-operational concern -- neither admin tier
+# touches it, per the admin-hierarchy redesign.
+FacultyOnly = Depends(require_roles(UserRole.faculty))
 
 
 def _translate(exc: Exception) -> HTTPException:
@@ -32,6 +41,8 @@ def _translate(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, PermissionDeniedError):
         return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
+    if isinstance(exc, ConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
     )
@@ -41,7 +52,7 @@ def _translate(exc: Exception) -> HTTPException:
 async def list_assessments(
     course_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         await course_service.get_course_for_user(db, course_id, current_user)
@@ -55,7 +66,7 @@ async def list_assessments(
 async def create_assessment(
     data: AssessmentCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         return await assessment_service.create_assessment(db, data, current_user)
@@ -67,7 +78,7 @@ async def create_assessment(
 async def get_assessment(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         return await assessment_service.get_assessment_for_user(db, assessment_id, current_user)
@@ -80,7 +91,7 @@ async def update_assessment(
     assessment_id: int,
     data: AssessmentUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         return await assessment_service.update_assessment(
@@ -94,7 +105,7 @@ async def update_assessment(
 async def delete_assessment(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         course_id = await assessment_service.delete_assessment(
@@ -111,7 +122,7 @@ async def delete_assessment(
 async def list_questions(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         await assessment_service.get_assessment_for_user(db, assessment_id, current_user)
@@ -128,13 +139,13 @@ async def create_question(
     assessment_id: int,
     data: QuestionCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         question = await question_service.create_question(
             db, assessment_id, data, current_user
         )
-    except (NotFoundError, PermissionDeniedError, ValidationError) as exc:
+    except (NotFoundError, PermissionDeniedError, ValidationError, ConflictError) as exc:
         raise _translate(exc) from exc
 
     assessment = await assessment_service.get_assessment(db, assessment_id)
@@ -142,18 +153,43 @@ async def create_question(
     return question
 
 
+@router.post(
+    "/{assessment_id}/questions/bulk",
+    response_model=QuestionBulkCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_questions_bulk(
+    assessment_id: int,
+    data: QuestionBulkCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOnly,
+):
+    """Create several questions at once (e.g. N MCQ/Fill-in-the-Blank/True-
+    False items), all-or-nothing."""
+    try:
+        questions = await question_service.bulk_create_questions(
+            db, assessment_id, data.items, current_user
+        )
+    except (NotFoundError, PermissionDeniedError, ValidationError, ConflictError) as exc:
+        raise _translate(exc) from exc
+
+    assessment = await assessment_service.get_assessment(db, assessment_id)
+    await attainment_service.recalculate_course_attainment(db, assessment.course_id)
+    return QuestionBulkCreateResponse(created=questions)
+
+
 @router.patch("/questions/{question_id}", response_model=QuestionRead)
 async def update_question(
     question_id: int,
     data: QuestionUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         question, course_id = await question_service.update_question(
             db, question_id, data, current_user
         )
-    except (NotFoundError, PermissionDeniedError, ValidationError) as exc:
+    except (NotFoundError, PermissionDeniedError, ValidationError, ConflictError) as exc:
         raise _translate(exc) from exc
 
     # Changing marks or the CLO tag changes attainment (section 8).
@@ -165,7 +201,7 @@ async def update_question(
 async def delete_question(
     question_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         course_id = await question_service.delete_question(db, question_id, current_user)
@@ -180,7 +216,7 @@ async def suggest_question_tag(
     assessment_id: int,
     data: TagSuggestRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         assessment = await assessment_service.get_assessment_for_user(
@@ -199,7 +235,7 @@ async def suggest_question_tag(
 async def list_scores(
     assessment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         await assessment_service.get_assessment_for_user(db, assessment_id, current_user)
@@ -218,7 +254,7 @@ async def bulk_enter_scores(
     assessment_id: int,
     data: BulkScoreRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = FacultyOrAdmin,
+    current_user: User = FacultyOnly,
 ):
     try:
         saved, recalculated = await score_service.bulk_enter_scores(

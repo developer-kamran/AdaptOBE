@@ -4,6 +4,8 @@
 
 If you're using Claude Code: **point it at this file first** (`Read HANDOFF.md`) before asking it to build anything. It contains the same architectural conventions the project's `CLAUDE.md` enforces, plus everything `CLAUDE.md` *doesn't* say because it only became true as the project was actually built.
 
+**This file describes the state as of the Module 5 handoff and is not kept in lockstep with every change since.** For what's happened after that point (the Super Admin / Sub-Admin role split, new user fields, the full faculty-modules overhaul — course/CLO/question validation, enrollment file import, backlog-student enrollment, batch-year-aware seat number eligibility, question types, etc.), see [`CHANGELOG.md`](CHANGELOG.md) — that's the living record now. This document has been refreshed to stay directionally accurate (schema table, test count, gotchas) but CHANGELOG.md is still authoritative for exact dates and detail.
+
 ---
 
 ## Table of Contents
@@ -49,6 +51,7 @@ FastAPI (fully async) — Routers → Services → SQLAlchemy models
         +--> sentence-transformers (all-MiniLM-L6-v2, PyTorch) — CLO/PLO embeddings
         +--> native FastAPI WebSockets — real-time dashboard push
         +--> ReportLab / openpyxl — PDF / Excel export
+        +--> pdfplumber / openpyxl (read path) — bulk student roster import
 ```
 
 **The one architectural rule that matters most:** routers contain *no business logic*. They translate HTTP ↔ Pydantic schemas and convert typed service exceptions (`NotFoundError`, `ConflictError`, `PermissionDeniedError`, `ValidationError`) into HTTP status codes. All actual logic — math, AI matching, validation — lives in `app/services/*.py`, which is what makes it independently unit-testable with zero HTTP or DB mocking. **Follow this pattern for Module 5.** Your XGBoost training/inference code belongs in `app/ml/`, called from a new `app/services/risk_service.py`, called from a thin `app/routers/ml.py`.
@@ -88,6 +91,7 @@ Then:
 ```powershell
 alembic upgrade head                 # builds the full schema, including CREATE EXTENSION vector
 python scripts/seed_admin.py --email admin@yourdomain.edu --password YourPass123 --full-name "Admin"
+# ^ creates a super_admin account (role split happened after this handoff — see CHANGELOG.md)
 python scripts/seed_ubit_data.py     # seeds department, 4 programmes, 40 PLOs with real embeddings
 uvicorn app.main:app --reload --port 8000
 ```
@@ -113,18 +117,20 @@ Full ER diagram: `docs/SDD.md` §5 / `docs/AdaptOBE_SDD.pdf` Diagram 3. Quick re
 
 | Table | Purpose | Key relationships |
 |---|---|---|
-| `users` | All accounts (admin/faculty/student) | — |
+| `users` | All accounts (`super_admin`/`sub_admin`/`faculty`/`student` — split from a single `admin` role after this handoff, see CHANGELOG.md) | `dept_id` FK (nullable); also `employee_id`, `father_name`, `password_encrypted`; `enrollment_no`/`seat_no` each globally `UNIQUE` |
 | `departments` | Single row today: UBIT | → `programs` |
 | `programs` | 4 fixed rows: BSSE/BSCS/BSAI/BSDS | `dept_id` FK; → `plos`, `courses` |
 | `plos` | **40 rows** — 10 standard outcomes × 4 programmes (per-programme, not shared) | `program_id` FK; `embedding vector(384)` |
-| `courses` | Faculty-owned | `program_id`, `owner_faculty_id` FKs |
-| `clos` | Course Learning Outcomes | `course_id` FK (CASCADE); `embedding vector(384)` |
+| `courses` | Faculty-owned | `program_id`, `owner_faculty_id` FKs; `UNIQUE(program_id, code, semester)` — **not** a global unique on `code` alone (changed post-handoff so the same code can legitimately repeat in a different programme or semester, e.g. a retake offering — see CHANGELOG.md) |
+| `clos` | Course Learning Outcomes | `course_id` FK (CASCADE); `embedding vector(384)`; `bloom_level` required at creation (one of the 6 standard levels) in the Pydantic schema, though the DB column stays nullable so pre-existing rows aren't broken |
 | `clo_plo_mappings` | Confirmed CLO→PLO links | `UNIQUE(clo_id, plo_id)`; `strength` 1–3 CHECK |
-| `assessments` | Quiz/assignment/lab/midterm/final | `course_id` FK (CASCADE) |
-| `questions` | Tagged to a CLO (nullable) | `clo_id` FK **SET NULL** on delete — see §9 |
+| `assessments` | Quiz/assignment/lab/project/midterm/final | `course_id` FK (CASCADE); `type` ENUM `assessment_type` — `project` joined `lab` as an assessment-level type post-handoff, see CHANGELOG.md |
+| `questions` | Tagged to a CLO (nullable) | `clo_id` FK **SET NULL** on delete — see §9; `UNIQUE(assessment_id, question_number)`; sum of `marks` across an assessment's questions is capped at that assessment's `total_marks`, enforced in `question_service.py`; `question_type` ENUM (`question`/`mcq`/`fill_blank`/`true_false`/`project`/`lab`, default `question`) + `type_data` JSONB for the type-specific payload (options, correct answer, description, ...) — see `schemas/question.py` for the shape per type. **`question_type` is no longer freely choosable**: `question_service.py` requires it match the parent assessment's `type` for `lab`/`project` (and forbids both on every other assessment type) — those two are managed via `LabProjectPanel.jsx`, not the generic "+ Add Question" picker. See CHANGELOG.md ("Lab and Project move from question types to assessment types"). |
 | `student_scores` | Raw marks | `UNIQUE(question_id, student_id)` |
 | `course_enrollments` | Roster | `UNIQUE(course_id, student_id)` |
 | `attainment_records` | **Derived data** — wiped and rebuilt on every recalculation, never patched | `UNIQUE(student_id, course_id, clo_id)` |
+
+**Seat-number batch-year eligibility is computed, not stored.** `app/core/institution.py` has `expected_seat_no_year(semester)` / `expected_seat_no_prefix(program_code, semester)` / `is_backlog_batch_year(seat_no, semester)` — a student's expected enrollment year is derived from a course's `semester` and *today's real calendar year* (two semesters per academic year: semester 4 in 2026 → expected year 2024; semester 8 in 2026 → 2022), never frozen at course-creation time. `GET /students?course_id=` uses this for the normal "who can enroll" candidate list (programme + current batch only); `&backlog=true` flips it to "any programme, but strictly *earlier* than the current batch" for the "Add Backlog Student" flow. See `tests/test_seat_no.py` for the exact rules as pure-function tests.
 
 For Module 5 (ML risk prediction), `CLAUDE.md` §6 specifies a `student_predictions` table (not yet created — you'll add it via a new Alembic migration):
 ```
@@ -137,7 +143,7 @@ The exact SHAP JSON schema you must produce is in `CLAUDE.md` §9 — copy it ex
 
 ## 5. What's Already Built (Modules 0–4)
 
-All of the below is implemented, tested (165 passing backend tests), and has a real frontend UI — not just API endpoints.
+All of the below is implemented, tested (165 passing backend tests at the time these modules were built — 280 now, see CHANGELOG.md), and has a real frontend UI — not just API endpoints.
 
 | Module | What's in it |
 |---|---|
@@ -147,8 +153,14 @@ All of the below is implemented, tested (165 passing backend tests), and has a r
 | **3** | Assessments, questions, bulk scoring, the direct attainment engine (`attainment_math.py` + `attainment_service.py`) |
 | **4** | Faculty dashboard (CLO×PLO heatmap), native WebSocket live updates, PDF/Excel export |
 | *(unnumbered)* | UBIT institutional data seed script (idempotent), full frontend UI for Modules 1–3 (Admin panel, course authoring, AI mapping modal, score-entry grid) |
+| *(post-handoff, see CHANGELOG.md)* | Super Admin / Sub-Admin role split; Faculty ID / Father's Name required fields; reversible password storage so a sub-admin can view a generated password from Edit; **bulk student import** — upload an Excel/PDF roster, columns matched to fields by reusing the same `all-MiniLM-L6-v2` model (`app/ml/column_matcher.py`), preview before anything is written, incomplete rows reported and skipped rather than persisted. |
+| *(post-handoff, faculty-modules round — see CHANGELOG.md)* | **Courses**: duplicate prevention scoped to `(programme, code, semester)`. **CLOs**: required Bloom level (6 standard levels), Edit/Delete. **AI mapping/tagging UI**: raw cosine score replaced by a Strong/Moderate/Weak label + an "ⓘ" `InfoTooltip` explaining the method (score still available, just not primary). **Enrollments**: programme + batch-year-scoped candidate list, "Add Students via File" (matches an uploaded roster to *existing* accounts and enrolls them — never creates accounts, unlike the admin bulk import), and "Add Backlog Student" (searches the whole department for an *earlier*-batch student, any programme). **Assessments/Questions**: Edit/Delete, required question text, per-assessment unique question numbers, a marks-cap enforced against the assessment total, and (as originally built in this round) 6 question types including Project/Lab. **Account management**: Reactivate (alongside Deactivate), live search-as-you-type in every admin account list, auto-generated password (shown once, also viewable later from Edit) for the manual "Add Student" form instead of a password field. |
+| *(post-handoff, see CHANGELOG.md)* | **Lab and Project moved from question types to assessment types.** `AssessmentType` gained `project` (`lab` already existed); the "+ Add Question" picker now only offers Question/MCQ/Fill-in-the-Blank/True-False; a Lab or Project assessment's detail page instead shows `LabProjectPanel.jsx`, a dedicated "add a graded component" screen. Backed by the same `Question`/`question_type`/`type_data` rows as before (now backend-validated to match the assessment's own type), so Score Entry needed zero changes. |
+| *(post-handoff, see CHANGELOG.md)* | **Full mobile/responsive pass.** Every page and shared component now scales down to a 375px phone: `Navbar` gained a hamburger menu below `md`; `Tabs`/`Card`/`Modal`/`InfoTooltip` all got mobile treatment (see §7 for the patterns); every page's title+button header row stacks on mobile instead of overflowing; every desktop-width modal form grid collapses to one column below `sm`. Data tables were deliberately left as horizontal-scroll (already the case via the shared `Table` component) rather than rebuilt as mobile card lists. |
 
-**Frontend routes that exist today:** `/login`, `/dashboard`, `/admin` (admin-only), `/courses`, `/courses/:id`, `/courses/:id/assessments/:id`. There is **no student-facing route** — student accounts exist and can log in, but hit "no access" on every current page. That's Module 6, not built yet.
+**Frontend routes that exist today:** `/login`, `/dashboard` (faculty-only), `/admin` (`super_admin`/`sub_admin`), `/courses`, `/courses/:id`, `/courses/:id/assessments/:id`. The Admin Panel's tabs differ by role: a `super_admin` sees Departments/Sub-Admins; a `sub_admin` sees Programmes/PLOs/Students/Faculty (each its own tab as of the CHANGELOG.md entry after this handoff). There is **no student-facing route** — student accounts exist and can log in, but hit "no access" on every current page. That's Module 6, not built yet.
+
+**Frontend structure additions from the faculty-modules round:** a new `frontend/src/pages/assessment/` folder (mirrors the `pages/course/` convention) holding `QuestionTypeStep.jsx`, `QuestionFormModal.jsx`, `BulkQuestionModal.jsx`, `TypeFieldsEditor.jsx`, and `questionTypes.js` — orchestrated from `AssessmentDetailPage.jsx`. `pages/course/` gained `EnrollImportModal.jsx` and `BacklogEnrollModal.jsx`. New shared pieces: `components/ui/InfoTooltip.jsx` and `utils/similarity.js` (the Strong/Moderate/Weak threshold logic, shared between CLO→PLO and question→CLO suggestion UIs).
 
 ---
 
@@ -169,7 +181,7 @@ Straight from `CLAUDE.md` §10, in order:
 - Student Dashboard (`.jsx`) showing personal CLO attainment breakdown and score history. The backend endpoint `GET /api/v1/student/progress` is in the catalog but **not implemented yet** — you'll build both the endpoint and the page.
 - Automated learning-gap alerts for weak CLOs.
 - Adaptive quiz generator scaling difficulty to per-student CLO performance.
-- Frontend: add `/student/*` routes, gated `roles={['student']}` in `ProtectedRoute`, and a student-facing nav section in `Navbar.jsx` (currently only renders links for `faculty`/`admin`).
+- Frontend: add `/student/*` routes, gated `roles={['student']}` in `ProtectedRoute`, and a student-facing nav section in `Navbar.jsx` (currently renders links per role — `faculty`/`sub_admin` get Courses, `faculty` gets Dashboard, `super_admin`/`sub_admin` get Admin Panel — nothing for `student` yet).
 
 ### Module 7 — Production Containerization & Deployment
 - Dockerfiles for backend (Python/FastAPI) and frontend (React static build).
@@ -184,7 +196,7 @@ These aren't suggestions; the existing 165 tests and every reviewed decision in 
 
 1. **Async everywhere.** Every DB call uses SQLAlchemy `AsyncSession`. Never a blocking call inside an `async def` route or service function. XGBoost training/inference is itself CPU-bound and synchronous — offload it with `asyncio.to_thread(...)`, exactly like `app/ml/embeddings.py` already does for sentence-transformer encoding. Copy that pattern.
 2. **Routers → Services → Models, strictly.** A router function is ~10 lines: call a service function, catch its typed exceptions, return. If you're writing an `if` statement that isn't RBAC or exception translation inside a router, it belongs in a service instead.
-3. **RBAC on every protected endpoint**, via `Depends(require_roles(UserRole.faculty, UserRole.admin))` (see `app/core/dependencies.py`). Default to the narrowest role set the use case actually needs — two routers (`plos.py`, `programs.py`) were originally admin-only-by-accident on their GET endpoints and had to be fixed because faculty genuinely needed read access. Think about *who reads this* as well as *who writes it*, before shipping.
+3. **RBAC on every protected endpoint**, via `Depends(require_roles(UserRole.faculty, UserRole.sub_admin))` (see `app/core/dependencies.py`; the flat `UserRole.admin` from this handoff's era no longer exists in code — it's `super_admin`/`sub_admin`/`faculty`/`student` now, see CHANGELOG.md). Default to the narrowest role set the use case actually needs — two routers (`plos.py`, `programs.py`) were originally admin-only-by-accident on their GET endpoints and had to be fixed because faculty genuinely needed read access. Think about *who reads this* as well as *who writes it*, before shipping.
 4. **Typed service exceptions, not raw ones.** Use `NotFoundError` / `ConflictError` / `PermissionDeniedError` / `ValidationError` from `app/services/exceptions.py`; routers translate these to HTTP codes. Don't raise `HTTPException` from inside a service.
 5. **Pydantic v2 only** — no v1-style validators or `Config` classes.
 6. **Pure functions for anything mathematical.** `attainment_math.py` takes numbers in, returns numbers out, no DB/HTTP awareness — that's why it has 24 unit tests that run in 0.06s. Your risk-scoring math (feature normalization, threshold logic) should follow the same pattern; wire it up in a service, keep the math itself framework-free.
@@ -192,19 +204,20 @@ These aren't suggestions; the existing 165 tests and every reviewed decision in 
 8. **State management is React Context, nothing else.** This was an explicit decision (documented in `CLAUDE.md` §3) after Module 4 — don't introduce Redux/Zustand/etc. unless cross-page state genuinely outgrows Context.
 9. **Migrations are real, reviewed Alembic migrations**, not hand-edited SQL. Run `alembic revision --autogenerate`, **read the generated file** (autogenerate gets enum/cascade details wrong sometimes — see §9 below), then `alembic upgrade head`. Run `alembic check` before considering a schema change done.
 10. **Commit per completed module**, with a message referencing the module, only after its tests pass. Don't commit mid-module.
+11. **Mobile-responsive by default, down to a 375px phone** (post-handoff, see CHANGELOG.md "Full mobile/responsive frontend pass"). New UI should follow the patterns already established rather than reintroducing desktop-only layout: page header rows that pair a title with action button(s) use `flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3` so they stack below `sm`; multi-button groups get `flex flex-wrap`; modal form grids use `grid-cols-1 sm:grid-cols-N`, never a bare `grid-cols-N`; avoid fixed pixel/rem widths on anything that isn't a small fixed element (icons, badges) — use `w-full sm:w-64` instead of `w-64` for things like select-box filters. Wide data tables stay on the existing horizontal-scroll pattern (`Table` component already wraps in `overflow-x-auto`) rather than being rebuilt as mobile card lists — that's a deliberate, consistent choice for this data-dense admin app, not an oversight.
 
 ---
 
 ## 8. Testing
 
-165 backend tests, three tiers (see `docs/SDD.md` §9 for the full rationale):
+280 backend tests as of the most recent CHANGELOG.md entry (165 at this handoff's original writing), three tiers (see `docs/SDD.md` §9 for the full rationale):
 1. **Pure unit tests** — math/logic with no DB, e.g. `tests/test_attainment_math.py`.
 2. **Service/engine integration tests** — real (but transactionally rolled-back) Postgres, e.g. `tests/test_attainment_engine.py`.
 3. **API/RBAC tests** — full HTTP surface per endpoint, asserting both success and that the wrong role gets a 403.
 
 **Write edge-case tests alongside the implementation, not after** — this is an explicit project rule (`CLAUDE.md` §8) that was actually followed for the attainment engine and should be followed for your risk-prediction edge cases too (what happens with <5 assessment records? a student with zero attendance data? a course with no CLOs yet?).
 
-Run everything: `cd backend && pytest -v` (from an activated venv). All 165 must pass before you commit a module.
+Run everything: `cd backend && pytest -v` (from an activated venv). All must pass before you commit a module. While iterating on one area, run just the relevant files instead of the full suite each time (e.g. `pytest tests/test_admin_hierarchy.py tests/test_auth.py -v`) — the full run takes ~2.5–3 minutes because every test hits a real (transactionally-rolled-back) Postgres connection and some load the embedding model.
 
 **Test isolation gotcha you need to know about:** `tests/conftest.py` uses a dedicated `NullPool` engine (not the app's normal pooled engine) for the test fixtures. This isn't decorative — pytest-asyncio spins up a new event loop per test by default, and asyncpg connections are bound to the event loop they were created in. Reusing the app's normal connection pool across tests causes a cryptic `InterfaceError: cannot perform operation: another operation is in progress`. If you add new fixtures, reuse the existing `db_session`/`client` pattern rather than rolling your own DB connection — it's already solved this problem for you.
 
@@ -220,19 +233,22 @@ Things that cost real debugging time already — don't rediscover them:
 - **WebSocket auth can't use headers.** Browsers can't set custom headers on the WS handshake, so the JWT travels as `?token=` query param (`app/routers/ws.py`). It's validated against the same RBAC/ownership rules as REST. If Module 5/6 add more WebSocket endpoints, follow this same pattern (and be aware query-param tokens can end up in server access logs — acceptable for a local FYP demo, worth a short-lived ticket scheme if this ever goes to production).
 - **The attainment engine deletes-then-reinserts, it never patches.** `attainment_records` for a course are wholesale rebuilt on every recalculation. If you add ML-driven fields to a similar "derived data" table, consider the same pattern — it's what makes correctness easy to reason about and test.
 - **Embeddings are computed once, at creation time**, stored as `vector(384)` columns, never re-computed per request. If Module 5 needs any embeddings (e.g. for feature engineering from text), follow this pattern, not on-the-fly encoding per API call.
-- **`GET /admin/plos` and `GET /admin/programs` are intentionally faculty+admin, not admin-only** — despite living under an `/admin/*` prefix. Only the mutating verbs (POST/PATCH/DELETE) are admin-only. This was a deliberate fix, not an oversight — don't "clean it up" back to admin-only.
-- **No student portal exists**, but student *accounts* do (Module 1 built full user management for all three roles). Don't confuse "no UI" with "no backend support" when scoping Module 6.
+- **`GET /admin/plos` and `GET /admin/programs` are intentionally faculty+sub_admin, not sub_admin-only** — despite living under an `/admin/*` prefix. Only the mutating verbs (POST/PATCH/DELETE) are sub_admin-only, and department-scoped to that sub_admin's own department. `super_admin` cannot read or write either at all (post-handoff change — see CHANGELOG.md; `super_admin` only manages Departments and Sub-Admins). Don't "clean it up" back to a single admin-only role.
+- **No student portal exists**, but student *accounts* do (Module 1 built full user management for all account types). Don't confuse "no UI" with "no backend support" when scoping Module 6.
+- **Passwords are stored two ways, deliberately, per an explicit product decision.** `password_hash` (bcrypt, one-way) is the only thing `authenticate_user` ever checks — that's unchanged. `password_encrypted` (Fernet, reversible, key in `PASSWORD_ENCRYPTION_KEY`) is a *second* copy added so a sub-admin can view a student/faculty account's password from the Edit page. This is a real, acknowledged reduction in security posture versus hash-only storage (anyone with DB or key access can recover every plaintext password) — it was chosen knowingly, not an oversight. Never let the two drift: any new account-creation path must set both, via `auth_service.register_user` (the only place that does).
+- **File uploads need `python-multipart` installed**, or every `UploadFile`-based endpoint fails at import/request time with an unhelpful error. It's easy to forget since nothing else in this project touches multipart forms.
+- **Killing a `uvicorn` process on Windows can be misleading.** `Stop-Process` on the PID that `Get-NetTCPConnection -LocalPort 8000` reports sometimes appears to succeed (`Get-Process` for that PID returns "not found") while the port keeps serving requests and the old code keeps responding — a stale PID-reporting quirk, not a real zombie process. If a manual verification server won't die, re-query `Get-NetTCPConnection -LocalPort 8000 -State Listen` for the *current* owning PID (it can differ from what you just killed) and/or check `Get-Process python` for the actual worker, rather than trusting the first PID you found.
+- **A brand-new Postgres ENUM column added via a standalone `op.add_column` does NOT auto-create the type**, even though it works fine when the enum is part of a `create_table(...)` in the same migration. Adding `question_type` this way failed with `type "question_type" does not exist` until the migration explicitly did `sa.Enum(...).create(op.get_bind(), checkfirst=True)` *before* the `add_column` call. If you add another enum column to an *existing* table, expect to need this same explicit `.create()` step — autogenerate won't add it for you.
+- **Seat-number batch-year eligibility is deliberately computed against the real current date, every time — never stored on the course.** `app.core.institution.expected_seat_no_year(semester)` subtracts `semester // 2` years from *today's* calendar year (two semesters per academic year). This means the same course's "current batch" prefix quietly shifts forward every year without a migration or data change — that's the intended behavior (a semester-4 course is always "2 years back," whatever year it currently is), not a bug. Don't hardcode a reference year anywhere except in tests (where `reference_year=` is passed explicitly so assertions don't go stale).
+- **The dev database accumulates real data from actual use, and some tests didn't originally account for that.** Two bugs surfaced this way: a seed-data test tried to `DELETE` the real seeded programmes to get a "clean slate," which started failing once a real course referenced them (fixed by pointing the seed tests at isolated `UBIT-TEST-*` codes instead of ever touching the real ones — see `tests/test_institution_seed.py`'s `fake_institution` fixture); and a score-entry test asserted an *entire table* was empty after a rejected batch, which broke the moment any unrelated real score row existed (fixed by scoping the assertion to the rows the test itself created). When writing a new test, assume the dev DB already has real rows you don't know about and scope every assertion accordingly — never assert "no rows exist anywhere" or generate IDs/codes that could collide with real seeded data.
 
 ---
 
 ## 10. Current Repo State & Demo Data
 
-As of handoff, the local dev database has:
-- 1 admin account (bootstrap, created via `seed_admin.py`)
-- The full UBIT institutional seed: 1 department, 4 programmes, 40 PLOs with real embeddings
-- No demo courses/students left seeded — prior demo data was cleaned up after each verification pass
+**As of this handoff's original writing**, the local dev database had 1 bootstrap admin account, the full UBIT institutional seed (1 department, 4 programmes, 40 PLOs), and no demo courses/students. **That snapshot is now stale** — the role split, real sub-admin/faculty/student accounts, and manual verification passes since then have moved the DB well past this. Don't treat this section as current; check the database directly (`psql`) or ask for a fresh count if you need to know what's actually seeded before adding demo data of your own.
 
-If you need a quick working example to test against, either re-run through the UI (Admin Panel → register a faculty account → log in as faculty → create a course) or ask for the demo-data script used previously (it exists in conversation history but wasn't kept as a permanent script in the repo).
+If you need a quick working example to test against, either re-run through the UI (Admin Panel → add a sub-admin → log in as sub-admin → register faculty/students → create a course) or ask for the demo-data script used previously (it exists in conversation history but wasn't kept as a permanent script in the repo).
 
 **Do not commit real `.env` values.** `backend/.env` and `frontend/.env` are gitignored; only `.env.example` files are tracked, with placeholder values.
 

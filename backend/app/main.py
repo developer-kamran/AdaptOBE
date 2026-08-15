@@ -17,6 +17,7 @@ from app.routers import (
     mappings,
     plos,
     programs,
+    student_import,
     students,
     users,
     ws,
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(students.router)
+app.include_router(student_import.router)
 app.include_router(departments.router)
 app.include_router(programs.router)
 app.include_router(plos.router)

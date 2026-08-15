@@ -84,7 +84,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-6 flex flex-col gap-5">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-4 sm:px-6 sm:py-6 flex flex-col gap-5">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-xl font-semibold text-ink-900">Faculty Dashboard</h1>
@@ -94,7 +94,7 @@ export default function DashboardPage() {
           </div>
 
           {courses && courses.length > 0 && (
-            <div className="w-64">
+            <div className="w-full sm:w-64">
               <Select
                 value={selectedCourseId ?? ''}
                 onChange={(e) => setSelectedCourseId(Number(e.target.value))}

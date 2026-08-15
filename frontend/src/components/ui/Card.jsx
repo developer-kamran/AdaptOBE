@@ -12,16 +12,18 @@ export function Card({ className = '', children, ...props }) {
 
 export function CardHeader({ title, description, actions, className = '' }) {
   return (
-    <div className={`flex items-start justify-between gap-4 px-5 py-4 border-b border-border ${className}`}>
+    <div
+      className={`flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 px-4 py-4 sm:px-5 border-b border-border ${className}`}
+    >
       <div>
         <h2 className="text-sm font-semibold text-ink-900">{title}</h2>
         {description && <p className="mt-0.5 text-xs text-ink-500">{description}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 shrink-0">{actions}</div>}
     </div>
   )
 }
 
 export function CardBody({ className = '', children }) {
-  return <div className={`p-5 ${className}`}>{children}</div>
+  return <div className={`p-4 sm:p-5 ${className}`}>{children}</div>
 }

@@ -16,6 +16,7 @@ against the department's own OBE manual before treating it as authoritative.
 """
 
 from dataclasses import dataclass
+from datetime import date
 
 DEPARTMENT_NAME = (
     "Department of Computer Science "
@@ -46,6 +47,72 @@ PROGRAMS: tuple[ProgramSpec, ...] = (
     ProgramSpec(code="BSAI", name="BS Artificial Intelligence", total_semesters=8),
     ProgramSpec(code="BSDS", name="BS Data Science", total_semesters=8),
 )
+
+#: A student's `seat_no` is `B<2-digit enrollment year><programme code><roll>`
+#: (the institution's own numbering scheme, not derived from anything else in
+#: this codebase), e.g. `B241101-0007` for a BSSE student who enrolled in
+#: 2024. The programme-code segment below is fixed; the year segment is NOT
+#: -- see `expected_seat_no_prefix`. Programmes with no configured code are
+#: simply not filtered by any of the functions below.
+SEAT_NO_PROGRAM_CODES: dict[str, str] = {
+    "BSSE": "1101",
+    "BSCS": "1100",
+    "BSAI": "1102",
+    "BSDS": "1103",
+}
+
+#: Two semesters per academic year.
+SEMESTERS_PER_YEAR = 2
+
+
+def expected_seat_no_year(semester: int, reference_year: int | None = None) -> int:
+    """The 4-digit calendar year a *current-batch* (non-backlog) student in
+    `semester` should have originally enrolled, relative to `reference_year`
+    (defaults to today's real calendar year -- deliberately not stored on
+    the course, so this always reflects "as of right now").
+
+    Two semesters per academic year, so being in semester N means having
+    enrolled N // 2 years before the reference year: semester 4 in 2026 ->
+    enrolled 2024; semester 8 in 2026 -> enrolled 2022.
+    """
+    year = reference_year if reference_year is not None else date.today().year
+    return year - (semester // 2)
+
+
+def expected_seat_no_prefix(
+    program_code: str, semester: int, reference_year: int | None = None
+) -> str | None:
+    """The seat-number prefix a current-batch student in this programme and
+    semester should have right now, e.g. "B241101" for BSSE/semester 4 in
+    2026. None if the programme has no configured seat-number code."""
+    code = SEAT_NO_PROGRAM_CODES.get(program_code)
+    if code is None:
+        return None
+    year = expected_seat_no_year(semester, reference_year)
+    return f"B{year % 100:02d}{code}"
+
+
+def seat_no_batch_year(seat_no: str | None) -> int | None:
+    """Extract the 4-digit enrollment year encoded in a seat number like
+    "B221101-0001" (-> 2022). None if `seat_no` doesn't start with the
+    expected `B<2-digit year>` shape at all (rather than guessing)."""
+    if not seat_no or len(seat_no) < 3 or seat_no[0] != "B" or not seat_no[1:3].isdigit():
+        return None
+    return 2000 + int(seat_no[1:3])
+
+
+def is_backlog_batch_year(seat_no: str | None, semester: int, reference_year: int | None = None) -> bool:
+    """True if `seat_no`'s encoded enrollment year is strictly earlier than
+    a current-batch student's for this semester -- i.e. this looks like a
+    student repeating the course from an earlier cohort. Deliberately not
+    programme-scoped: a backlog student may come from any programme in the
+    department (see `services/enrollment_import_service.py` and the
+    "Add Backlog Student" flow). False for a seat number that doesn't
+    parse, since we can't confirm eligibility either way."""
+    batch_year = seat_no_batch_year(seat_no)
+    if batch_year is None:
+        return False
+    return batch_year < expected_seat_no_year(semester, reference_year)
 
 #: The ten standard PLOs, seeded identically under every programme.
 STANDARD_PLOS: tuple[PLOSpec, ...] = (

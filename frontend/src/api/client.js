@@ -81,8 +81,13 @@ async function refreshAccessToken() {
  * @param {boolean} [options.raw] - return the Response instead of parsed JSON (for file downloads)
  */
 export async function apiFetch(path, { method = 'GET', body, skipAuth = false, raw = false } = {}) {
+  // File uploads must go up as multipart. The browser has to set
+  // Content-Type itself so it can include the multipart boundary, so we
+  // neither set the header nor JSON-stringify in that case.
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData
+
   const doFetch = () => {
-    const headers = { 'Content-Type': 'application/json' }
+    const headers = isFormData ? {} : { 'Content-Type': 'application/json' }
     if (!skipAuth) {
       const token = getAccessToken()
       if (token) headers.Authorization = `Bearer ${token}`
@@ -90,7 +95,7 @@ export async function apiFetch(path, { method = 'GET', body, skipAuth = false, r
     return fetch(`${BASE_URL}${path}`, {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: isFormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
     })
   }
 

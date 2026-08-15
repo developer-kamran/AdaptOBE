@@ -2,8 +2,10 @@ from app.models.user import UserRole
 from tests.conftest import auth_header
 
 
-async def test_create_department_requires_admin(client, make_user):
-    faculty = await make_user("faculty.dept@adaptobe.edu", role=UserRole.faculty)
+async def test_create_department_requires_super_admin(client, make_user):
+    faculty = await make_user(
+        "faculty.dept@adaptobe.edu", role=UserRole.faculty, employee_id="FAC-DEPT"
+    )
     resp = await client.post(
         "/api/v1/admin/departments",
         json={"name": "Computer Science", "code": "CS"},
@@ -13,7 +15,7 @@ async def test_create_department_requires_admin(client, make_user):
 
 
 async def test_create_and_get_department(client, make_user):
-    admin = await make_user("admin.dept@adaptobe.edu", role=UserRole.admin)
+    admin = await make_user("superadmin.dept@adaptobe.edu", role=UserRole.super_admin)
     resp = await client.post(
         "/api/v1/admin/departments",
         json={"name": "Electrical Engineering", "code": "EE"},
@@ -30,7 +32,7 @@ async def test_create_and_get_department(client, make_user):
 
 
 async def test_create_department_duplicate_code_conflict(client, make_user):
-    admin = await make_user("admin.deptdup@adaptobe.edu", role=UserRole.admin)
+    admin = await make_user("superadmin.deptdup@adaptobe.edu", role=UserRole.super_admin)
     await client.post(
         "/api/v1/admin/departments",
         json={"name": "Mechanical Engineering", "code": "ME"},
@@ -45,13 +47,13 @@ async def test_create_department_duplicate_code_conflict(client, make_user):
 
 
 async def test_get_department_not_found(client, make_user):
-    admin = await make_user("admin.dept404@adaptobe.edu", role=UserRole.admin)
+    admin = await make_user("superadmin.dept404@adaptobe.edu", role=UserRole.super_admin)
     resp = await client.get("/api/v1/admin/departments/999999", headers=auth_header(admin))
     assert resp.status_code == 404
 
 
 async def test_update_department(client, make_user):
-    admin = await make_user("admin.deptupdate@adaptobe.edu", role=UserRole.admin)
+    admin = await make_user("superadmin.deptupdate@adaptobe.edu", role=UserRole.super_admin)
     create_resp = await client.post(
         "/api/v1/admin/departments",
         json={"name": "Civil Engineering", "code": "CE"},
@@ -69,7 +71,7 @@ async def test_update_department(client, make_user):
 
 
 async def test_delete_department(client, make_user):
-    admin = await make_user("admin.deptdelete@adaptobe.edu", role=UserRole.admin)
+    admin = await make_user("superadmin.deptdelete@adaptobe.edu", role=UserRole.super_admin)
     create_resp = await client.post(
         "/api/v1/admin/departments",
         json={"name": "Chemical Engineering", "code": "CHE"},
