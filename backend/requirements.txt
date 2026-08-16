@@ -11,6 +11,10 @@ python-jose[cryptography]
 cryptography
 bcrypt
 sentence-transformers
+xgboost
+shap
+scikit-learn
+pandas
 reportlab
 openpyxl
 python-multipart

@@ -8,11 +8,13 @@ import { Card, CardBody } from '../components/ui/Card'
 import CLOsPanel from './course/CLOsPanel'
 import EnrollmentsPanel from './course/EnrollmentsPanel'
 import AssessmentsPanel from './course/AssessmentsPanel'
+import AttendancePanel from './course/AttendancePanel'
 
 const TABS = [
   { value: 'clos', label: 'CLOs & Mappings' },
   { value: 'enrollments', label: 'Enrollments' },
   { value: 'assessments', label: 'Assessments' },
+  { value: 'attendance', label: 'Attendance' },
 ]
 
 export default function CourseDetailPage() {
@@ -68,6 +70,7 @@ export default function CourseDetailPage() {
                 {active === 'clos' && <CLOsPanel course={course} />}
                 {active === 'enrollments' && <EnrollmentsPanel course={course} />}
                 {active === 'assessments' && <AssessmentsPanel course={course} />}
+                {active === 'attendance' && <AttendancePanel course={course} />}
               </CardBody>
             </Card>
           </>

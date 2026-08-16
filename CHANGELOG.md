@@ -4,6 +4,88 @@ All notable changes to AdaptOBE are recorded here, most recent first. Each
 entry is a short summary of what changed, not a full diff — see git history
 for that.
 
+## 2026-08-15 — Module 6: Student portal & adaptive learning
+
+The first student-facing surface. Student accounts existed since Module 1 but
+had no UI — they now have a portal.
+
+- **Backend** (`app/routers/student.py`, student-only): `GET /student/progress`
+  (per-course CLO attainment with personal weak-CLO flags — a CLO is "weak"
+  when *this student's own* attainment is below the course threshold, not the
+  class-level flag); `GET /student/courses/{id}/scores` (assessment score
+  history); `GET /student/courses/{id}/adaptive-quiz` and `POST .../submit`.
+  Every query is scoped to the authenticated student — one student can never
+  read another's data or a course they're not enrolled in (403).
+- **Adaptive quiz** builds on the FYP-1 typed-question system: it draws only
+  from **auto-gradable** questions (`mcq` / `true_false` / `fill_blank`, which
+  carry a machine-checkable answer in `type_data`) and skips free-form
+  `question` items and the `lab`/`project` assessment components. It weights
+  question selection toward the student's weakest CLOs (`quiz_logic.allocate_quiz_slots`),
+  strips correct answers before sending, and grades on submit
+  (`quiz_logic.grade_answer`) — practice only, never written to `student_scores`.
+  Results include the CLOs to keep practicing. No new tables or migration.
+- **Frontend**: a `/student` route (gated `roles={['student']}`), a **My
+  Progress** dashboard (overall attainment, per-course CLO bars with weak
+  badges, expandable score history) and a **Practice Quiz** modal (MCQ /
+  True-False / Fill-blank inputs, instant scoring, focus-CLO feedback). Added
+  the student section to `Navbar` (desktop + mobile) — students previously hit
+  "no access" everywhere. **Fixed** `LoginPage` routing students to `/courses`
+  (faculty-only) on sign-in; they now land on `/student`.
+- **Tests**: `test_quiz_logic.py` (pure allocation + grading) and
+  `test_student_portal.py` (own-data isolation, auto-gradable-only quiz with
+  answers stripped, grading + focus CLOs, student-only RBAC). **313 backend
+  tests passing** (was 299). `npm run lint` / `npm run build` clean. Both
+  modules verified end-to-end in the running app.
+
+## 2026-08-15 — Module 5: ML risk prediction, SHAP, learning-gap detection
+
+The first module built after the FYP-1 merge. Adds per-course student risk
+classification with explainability, plus automated weak-CLO detection.
+
+- **New deps**: `xgboost`, `shap`, `scikit-learn`, `pandas` (added to
+  `requirements.txt`). Two friend-era deps that had never been installed in
+  the local venv — `python-multipart`, `pdfplumber` — were installed too, and
+  the local `.env` gained the `PASSWORD_ENCRYPTION_KEY` it was missing since
+  the reversible-password change (the app wouldn't boot without it).
+- **Two new tables** (migration `2e8ce4e237b9`):
+  - `attendance_records` — one faculty-entered attendance % per (course,
+    student). This was the one XGBoost feature with no existing source; rather
+    than model every class session, attendance is a single percentage faculty
+    maintain from a new **Attendance** tab on the course page.
+  - `student_predictions` — `risk_level` (low/medium/high) + `confidence_score`
+    + `predicted_score` + `shap_explanation` (JSONB), per CLAUDE.md §6/§9.
+    Treated as derived data: wiped and rebuilt per run, never patched (same
+    discipline as `attainment_records`).
+- **The model** (`app/ml/risk_model.py`): a real XGBoost classifier (risk) +
+  regressor (predicted score), with SHAP `TreeExplainer` producing the exact
+  section-9 payload. Because this deployment has no historical labelled
+  outcomes yet, the model is **bootstrapped on a synthetic sample** drawn from
+  a domain-sensible feature→performance relationship — a genuine trained model
+  with genuine SHAP values, retrainable on real outcomes later by swapping one
+  function, with no interface change. Training/inference is offloaded with
+  `asyncio.to_thread`, mirroring `embeddings.py`.
+- **Feature sourcing**: `quiz`/`assignment`/`midterm` averages from
+  assessment scores, `current_avg_clo_attainment` reused from the attainment
+  engine's persisted records, `attendance_percentage` from the new table. A
+  student needs ≥5 scored assessments (CLAUDE.md §9) or they're reported as
+  skipped, not predicted.
+- **Learning-gap detection** reuses `courses.attainment_threshold` and the
+  attainment engine's own course report — a gap is a CLO with data whose class
+  average is below threshold, exactly as the dashboard already defines it.
+- **Endpoints** (`app/routers/ml.py`, faculty-only per the role split):
+  `POST /api/v1/ml/predict-risk/{course_id}` runs + persists; `GET` returns
+  the last stored predictions without re-running. Attendance CRUD at
+  `GET/POST /api/v1/courses/{id}/attendance` (faculty-only).
+- **Frontend**: an **Attendance** tab on Course Detail (bulk % entry) and a
+  **Student Risk Prediction** card on the Faculty Dashboard — risk badges,
+  confidence/predicted-score, SHAP "why" behind an `InfoTooltip`, skipped-count
+  note, and below-threshold CLO gaps. Mobile-responsive, `npm run lint` /
+  `npm run build` clean.
+- **Tests**: `test_risk_math.py` (pure), `test_attendance.py`,
+  `test_risk_prediction.py` — feature assembly/clamping, the ≥5 gate, exact
+  SHAP shape, directional strong/weak sanity, learning-gap flagging, and the
+  faculty-only RBAC matrix. **299 backend tests passing** (was 280).
+
 ## 2026-08-13 — Full mobile/responsive frontend pass
 
 Before this pass, responsive Tailwind breakpoints (`sm:`/`md:`/`lg:`) appeared

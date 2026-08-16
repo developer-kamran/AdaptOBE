@@ -32,6 +32,11 @@ function NavLinks({ user }) {
           Admin Panel
         </NavLink>
       )}
+      {user.role === 'student' && (
+        <NavLink to="/student" className={NAV_LINK_CLASS}>
+          My Progress
+        </NavLink>
+      )}
     </>
   )
 }
@@ -52,6 +57,11 @@ function MobileNavLinks({ user, onNavigate }) {
       {(user.role === 'super_admin' || user.role === 'sub_admin') && (
         <NavLink to="/admin" className={MOBILE_NAV_LINK_CLASS} onClick={onNavigate}>
           Admin Panel
+        </NavLink>
+      )}
+      {user.role === 'student' && (
+        <NavLink to="/student" className={MOBILE_NAV_LINK_CLASS} onClick={onNavigate}>
+          My Progress
         </NavLink>
       )}
     </>

@@ -25,7 +25,9 @@ export default function LoginPage() {
           ? '/admin'
           : user?.role === 'faculty'
             ? '/dashboard'
-            : '/courses'
+            : user?.role === 'student'
+              ? '/student'
+              : '/courses'
       navigate(destination, { replace: true })
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : 'Something went wrong. Please try again.')
@@ -42,7 +44,7 @@ export default function LoginPage() {
             A
           </div>
           <h1 className="text-lg font-semibold text-ink-900">AdaptOBE</h1>
-          <p className="text-sm text-ink-500 mt-0.5">Sign in to your faculty dashboard</p>
+          <p className="text-sm text-ink-500 mt-0.5">Sign in to your account</p>
         </div>
 
         <Card>

@@ -10,13 +10,16 @@ from app.core.database import get_db
 from app.routers import (
     assessments,
     attainment,
+    attendance,
     auth,
     courses,
     departments,
     enrollments,
     mappings,
+    ml,
     plos,
     programs,
+    student,
     student_import,
     students,
     users,
@@ -55,6 +58,9 @@ app.include_router(enrollments.router)
 app.include_router(mappings.router)
 app.include_router(assessments.router)
 app.include_router(attainment.router)
+app.include_router(attendance.router)
+app.include_router(ml.router)
+app.include_router(student.router)
 app.include_router(ws.router)
 
 

@@ -7,6 +7,7 @@ import AdminPage from './pages/AdminPage'
 import CoursesPage from './pages/CoursesPage'
 import CourseDetailPage from './pages/CourseDetailPage'
 import AssessmentDetailPage from './pages/AssessmentDetailPage'
+import StudentDashboardPage from './pages/StudentDashboardPage'
 import Spinner from './components/ui/Spinner'
 
 function HomeRedirect() {
@@ -25,6 +26,7 @@ function HomeRedirect() {
     return <Navigate to="/admin" replace />
   }
   if (user.role === 'faculty') return <Navigate to="/dashboard" replace />
+  if (user.role === 'student') return <Navigate to="/student" replace />
   return <Navigate to="/courses" replace />
 }
 
@@ -71,6 +73,14 @@ export default function App() {
             element={
               <ProtectedRoute roles={['faculty']}>
                 <AssessmentDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student"
+            element={
+              <ProtectedRoute roles={['student']}>
+                <StudentDashboardPage />
               </ProtectedRoute>
             }
           />

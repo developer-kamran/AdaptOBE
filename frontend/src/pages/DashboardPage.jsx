@@ -9,6 +9,7 @@ import {
 import { useCourseWebSocket } from '../hooks/useCourseWebSocket'
 import Navbar from '../components/Navbar'
 import Heatmap from '../components/Heatmap'
+import RiskPanel from '../components/RiskPanel'
 import Button from '../components/ui/Button'
 import Select from '../components/ui/Select'
 import Spinner from '../components/ui/Spinner'
@@ -185,6 +186,8 @@ export default function DashboardPage() {
                 ) : null}
               </CardBody>
             </Card>
+
+            <RiskPanel courseId={selectedCourseId} />
           </>
         )}
       </main>
