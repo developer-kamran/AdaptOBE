@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { DndContext, closestCenter } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { createClo, deleteClo, listClos, updateClo } from '../../api/clos'
 import { ApiError } from '../../api/client'
 import Button from '../../components/ui/Button'
@@ -9,7 +11,12 @@ import Modal, { ModalFooter } from '../../components/ui/Modal'
 import Spinner from '../../components/ui/Spinner'
 import { Table, THead, TH, TBody, TR, TD } from '../../components/ui/Table'
 import EmptyState from '../../components/ui/EmptyState'
+import SortableRow from '../../components/ui/SortableRow'
+import DragHandle from '../../components/ui/DragHandle'
+import useLocalOrder from '../../hooks/useLocalOrder'
+import useDndSensors from '../../hooks/useDndSensors'
 import MappingModal from './MappingModal'
+import AiCloModal from './AiCloModal'
 
 //: Standard Bloom's Taxonomy (cognitive domain) levels -- must match
 //: `BLOOM_LEVELS` in `backend/app/schemas/clo.py`.
@@ -18,9 +25,14 @@ const BLOOM_LEVELS = ['Remember', 'Understand', 'Apply', 'Analyze', 'Evaluate', 
 export default function CLOsPanel({ course }) {
   const [clos, setClos] = useState(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [isAiCreateOpen, setIsAiCreateOpen] = useState(false)
   const [editingClo, setEditingClo] = useState(null)
   const [mappingClo, setMappingClo] = useState(null)
   const [error, setError] = useState('')
+
+  const { applyOrder, reorder } = useLocalOrder(`adaptobe.clo-order.${course.id}`)
+  const sensors = useDndSensors()
+  const orderedClos = clos ? applyOrder(clos) : clos
 
   const load = () => listClos(course.id).then(setClos)
 
@@ -28,6 +40,12 @@ export default function CLOsPanel({ course }) {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [course.id])
+
+  function handleDragEnd(event) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    reorder(orderedClos, active.id, over.id)
+  }
 
   async function handleDelete(clo) {
     if (!window.confirm(`Delete CLO "${clo.code}"? This also removes its PLO mappings.`)) return
@@ -44,9 +62,14 @@ export default function CLOsPanel({ course }) {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <p className="text-sm text-ink-500">Course Learning Outcomes for {course.code}.</p>
-        <Button size="sm" onClick={() => setIsCreateOpen(true)} className="self-start sm:self-auto">
-          + Add CLO
-        </Button>
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <Button variant="secondary" size="sm" onClick={() => setIsAiCreateOpen(true)}>
+            Create CLO with AI
+          </Button>
+          <Button size="sm" onClick={() => setIsCreateOpen(true)}>
+            + Add CLO
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -63,41 +86,53 @@ export default function CLOsPanel({ course }) {
           description="Add a CLO, then map it to Programme Learning Outcomes using AI-suggested matches."
         />
       ) : (
-        <Table>
-          <THead>
-            <TR>
-              <TH>Code</TH>
-              <TH>Title</TH>
-              <TH>Bloom Level</TH>
-              <TH></TH>
-            </TR>
-          </THead>
-          <TBody>
-            {clos.map((clo) => (
-              <TR key={clo.id}>
-                <TD className="font-medium whitespace-nowrap">{clo.code}</TD>
-                <TD>
-                  <p className="font-medium text-ink-900">{clo.title}</p>
-                  <p className="text-xs text-ink-500 mt-0.5 max-w-lg">{clo.description}</p>
-                </TD>
-                <TD className="text-ink-500">{clo.bloom_level || '—'}</TD>
-                <TD>
-                  <div className="flex items-center justify-end gap-1">
-                    <Button variant="secondary" size="sm" onClick={() => setMappingClo(clo)}>
-                      Map to PLOs
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => setEditingClo(clo)}>
-                      Edit
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleDelete(clo)}>
-                      Delete
-                    </Button>
-                  </div>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={orderedClos.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+            <Table>
+              <THead>
+                <TR>
+                  <TH className="w-8"></TH>
+                  <TH>Code</TH>
+                  <TH>Title</TH>
+                  <TH>Bloom Level</TH>
+                  <TH></TH>
+                </TR>
+              </THead>
+              <TBody>
+                {orderedClos.map((clo) => (
+                  <SortableRow key={clo.id} id={clo.id}>
+                    {({ attributes, listeners }) => (
+                      <>
+                        <TD>
+                          <DragHandle attributes={attributes} listeners={listeners} />
+                        </TD>
+                        <TD className="font-medium whitespace-nowrap">{clo.code}</TD>
+                        <TD>
+                          <p className="font-medium text-ink-900">{clo.title}</p>
+                          <p className="text-xs text-ink-500 mt-0.5 max-w-lg">{clo.description}</p>
+                        </TD>
+                        <TD className="text-ink-500">{clo.bloom_level || '—'}</TD>
+                        <TD>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button variant="secondary" size="sm" onClick={() => setMappingClo(clo)}>
+                              Map to PLOs
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => setEditingClo(clo)}>
+                              Edit
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => handleDelete(clo)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </TD>
+                      </>
+                    )}
+                  </SortableRow>
+                ))}
+              </TBody>
+            </Table>
+          </SortableContext>
+        </DndContext>
       )}
 
       <CloFormModal
@@ -119,6 +154,13 @@ export default function CLOsPanel({ course }) {
       {mappingClo && (
         <MappingModal clo={mappingClo} onClose={() => setMappingClo(null)} />
       )}
+
+      <AiCloModal
+        isOpen={isAiCreateOpen}
+        onClose={() => setIsAiCreateOpen(false)}
+        onSaved={load}
+        course={course}
+      />
     </div>
   )
 }

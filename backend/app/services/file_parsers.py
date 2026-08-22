@@ -16,6 +16,13 @@ EXCEL_EXTENSIONS = (".xlsx", ".xls")
 PDF_EXTENSIONS = (".pdf",)
 SUPPORTED_EXTENSIONS = EXCEL_EXTENSIONS + PDF_EXTENSIONS
 
+#: Extensions accepted for *document* text extraction (assessment-paper
+#: upload -- app/services/assessment_paper_import_service.py), as opposed to
+#: the tabular-row extraction above (roster/score-sheet imports). A .docx is
+#: a real supported source here (unlike the roster imports) since the
+#: assessment export feature already produces exam papers as .docx.
+DOCUMENT_EXTENSIONS = (".pdf", ".docx")
+
 
 class FileParseError(Exception):
     """Raised when a file cannot be read at all (corrupt, wrong format)."""
@@ -97,6 +104,17 @@ def parse_pdf(content: bytes) -> list[list[str]]:
                         row = [_clean(cell) for cell in raw_row]
                         if _is_blank_row(row):
                             continue
+                        if rows and row == rows[0]:
+                            # A multi-page PDF table built with reportlab's
+                            # `repeatRows=1` (or any tool that redraws the
+                            # header at the top of every page for
+                            # readability) makes pdfplumber extract that
+                            # same header row again on every page after the
+                            # first. Without this, each repeat becomes a
+                            # phantom "student" row exactly matching the
+                            # column headers (e.g. a row literally named
+                            # "Full Name" with seat no "Seat No").
+                            continue
                         rows.append(row)
                         if len(rows) >= MAX_ROWS:
                             return _trim_trailing_blank_columns(rows)
@@ -118,4 +136,48 @@ def parse_file(content: bytes, filename: str) -> list[list[str]]:
         return parse_pdf(content)
     raise FileParseError(
         f"Unsupported file type. Upload one of: {', '.join(SUPPORTED_EXTENSIONS)}"
+    )
+
+
+def _extract_pdf_text(content: bytes) -> str:
+    import pdfplumber
+
+    try:
+        with pdfplumber.open(BytesIO(content)) as pdf:
+            pages = [page.extract_text() or "" for page in pdf.pages]
+    except FileParseError:
+        raise
+    except Exception as exc:
+        raise FileParseError("This file could not be read as a PDF") from exc
+    return "\n".join(pages).strip()
+
+
+def _extract_docx_text(content: bytes) -> str:
+    from docx import Document
+
+    try:
+        document = Document(BytesIO(content))
+    except Exception as exc:
+        raise FileParseError("This file could not be read as a Word document") from exc
+
+    lines = [p.text for p in document.paragraphs]
+    for table in document.tables:
+        for row in table.rows:
+            lines.append(" | ".join(cell.text for cell in row.cells))
+    return "\n".join(line for line in lines if line.strip())
+
+
+def extract_document_text(content: bytes, filename: str) -> str:
+    """Extract plain text (not tabular rows) from an uploaded document, for
+    question-extraction (app/ml/question_extractor.py) -- distinct from
+    `parse_file()`'s tabular-row extraction used by roster/score-sheet
+    imports. Preserves line breaks (question numbering and MCQ options are
+    line-oriented) but not layout otherwise."""
+    lowered = filename.lower()
+    if lowered.endswith(".pdf"):
+        return _extract_pdf_text(content)
+    if lowered.endswith(".docx"):
+        return _extract_docx_text(content)
+    raise FileParseError(
+        f"Unsupported file type. Upload one of: {', '.join(DOCUMENT_EXTENSIONS)}"
     )

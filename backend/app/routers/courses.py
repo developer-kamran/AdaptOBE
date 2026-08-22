@@ -5,9 +5,16 @@ from app.core.database import get_db
 from app.core.dependencies import require_roles
 from app.models.user import User, UserRole
 from app.schemas.clo import CLOCreate, CLORead, CLOUpdate
+from app.schemas.clo_generation import GenerateCloRequest, GenerateCloResponse
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
 from app.services import clo_service, course_service
-from app.services.exceptions import ConflictError, NotFoundError, PermissionDeniedError
+from app.services.exceptions import (
+    ConflictError,
+    LLMGenerationError,
+    NotFoundError,
+    PermissionDeniedError,
+    ValidationError,
+)
 
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
 
@@ -122,6 +129,25 @@ async def create_clo(
         raise _not_found(exc) from exc
     except PermissionDeniedError as exc:
         raise _forbidden(exc) from exc
+
+
+@router.post("/{course_id}/clos/generate", response_model=GenerateCloResponse)
+async def generate_clo(
+    course_id: int,
+    data: GenerateCloRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOrSubAdmin,
+):
+    try:
+        return await clo_service.generate_clo_suggestion(db, course_id, data, current_user)
+    except NotFoundError as exc:
+        raise _not_found(exc) from exc
+    except PermissionDeniedError as exc:
+        raise _forbidden(exc) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except LLMGenerationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
 
 clo_router = APIRouter(prefix="/api/v1/clos", tags=["clos"])

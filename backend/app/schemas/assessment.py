@@ -9,17 +9,19 @@ class AssessmentCreate(BaseModel):
     course_id: int
     title: str = Field(min_length=1, max_length=255)
     type: AssessmentType
-    total_marks: float = Field(ge=0)
+    total_marks: float = Field(gt=0)
     weightage_percent: float = Field(ge=0, le=100)
     date: date_type | None = None
+    duration_minutes: int | None = Field(default=None, gt=0)
 
 
 class AssessmentUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     type: AssessmentType | None = None
-    total_marks: float | None = Field(default=None, ge=0)
+    total_marks: float | None = Field(default=None, gt=0)
     weightage_percent: float | None = Field(default=None, ge=0, le=100)
     date: date_type | None = None
+    duration_minutes: int | None = Field(default=None, gt=0)
 
 
 class AssessmentRead(BaseModel):
@@ -32,3 +34,4 @@ class AssessmentRead(BaseModel):
     total_marks: float
     weightage_percent: float
     date: date_type | None
+    duration_minutes: int | None

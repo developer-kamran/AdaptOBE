@@ -19,6 +19,8 @@ reportlab
 openpyxl
 python-multipart
 pdfplumber
+groq
+python-docx
 
 pytest
 pytest-asyncio

@@ -78,21 +78,6 @@ async def test_clo_with_no_tagged_questions_yields_zero_not_error(
     assert records[untagged.id].attainment_percentage == 0.0
 
 
-async def test_questions_with_zero_marks_yield_zero(
-    db_session, course, make_clo, make_student, enroll, make_assessment, make_question, enter_scores
-):
-    clo = await make_clo("CLO-1", "Loops", "Write loops and conditionals.")
-    student = await make_student("zeromarks")
-    await enroll(student)
-
-    assessment = await make_assessment(total_marks=0.0)
-    q1 = await make_question(assessment.id, 1, 0.0, clo.id)
-    await enter_scores(assessment.id, [(q1.id, student.id, 0.0)])
-
-    records = await _records(db_session, course.id)
-    assert records[0].attainment_percentage == 0.0
-
-
 async def test_course_with_no_enrolled_students_produces_no_records(
     db_session, course, make_clo, make_assessment, make_question
 ):

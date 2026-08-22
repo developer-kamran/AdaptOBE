@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { DndContext, closestCenter } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import {
   createAssessment,
   deleteAssessment,
@@ -15,6 +17,10 @@ import Spinner from '../../components/ui/Spinner'
 import Badge from '../../components/ui/Badge'
 import { Table, THead, TH, TBody, TR, TD } from '../../components/ui/Table'
 import EmptyState from '../../components/ui/EmptyState'
+import SortableRow from '../../components/ui/SortableRow'
+import DragHandle from '../../components/ui/DragHandle'
+import useLocalOrder from '../../hooks/useLocalOrder'
+import useDndSensors from '../../hooks/useDndSensors'
 
 const TYPE_LABEL = {
   quiz: 'Quiz',
@@ -32,12 +38,22 @@ export default function AssessmentsPanel({ course }) {
   const [error, setError] = useState('')
   const navigate = useNavigate()
 
+  const { applyOrder, reorder } = useLocalOrder(`adaptobe.assessment-order.${course.id}`)
+  const sensors = useDndSensors()
+  const orderedAssessments = assessments ? applyOrder(assessments) : assessments
+
   const load = () => listAssessments(course.id).then(setAssessments)
 
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [course.id])
+
+  function handleDragEnd(event) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    reorder(orderedAssessments, active.id, over.id)
+  }
 
   async function handleDelete(e, assessment) {
     e.stopPropagation()
@@ -82,51 +98,64 @@ export default function AssessmentsPanel({ course }) {
       ) : assessments.length === 0 ? (
         <EmptyState title="No assessments yet" description="Add a quiz, assignment or exam to start scoring students." />
       ) : (
-        <Table>
-          <THead>
-            <TR>
-              <TH>Title</TH>
-              <TH>Type</TH>
-              <TH>Total Marks</TH>
-              <TH>Weightage</TH>
-              <TH></TH>
-            </TR>
-          </THead>
-          <TBody>
-            {assessments.map((assessment) => (
-              <TR
-                key={assessment.id}
-                className="cursor-pointer"
-                onClick={() => navigate(`/courses/${course.id}/assessments/${assessment.id}`)}
-              >
-                <TD className="font-medium">{assessment.title}</TD>
-                <TD>
-                  <Badge tone="neutral">{TYPE_LABEL[assessment.type]}</Badge>
-                </TD>
-                <TD>{assessment.total_marks}</TD>
-                <TD>{assessment.weightage_percent}%</TD>
-                <TD>
-                  <div className="flex items-center justify-end gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setEditing(assessment)
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={(e) => handleDelete(e, assessment)}>
-                      Delete
-                    </Button>
-                    <span className="text-brand-600 text-xs font-medium">Manage →</span>
-                  </div>
-                </TD>
-              </TR>
-            ))}
-          </TBody>
-        </Table>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={orderedAssessments.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+            <Table>
+              <THead>
+                <TR>
+                  <TH className="w-8"></TH>
+                  <TH>Title</TH>
+                  <TH>Type</TH>
+                  <TH>Total Marks</TH>
+                  <TH>Weightage</TH>
+                  <TH></TH>
+                </TR>
+              </THead>
+              <TBody>
+                {orderedAssessments.map((assessment) => (
+                  <SortableRow
+                    key={assessment.id}
+                    id={assessment.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/courses/${course.id}/assessments/${assessment.id}`)}
+                  >
+                    {({ attributes, listeners }) => (
+                      <>
+                        <TD onClick={(e) => e.stopPropagation()}>
+                          <DragHandle attributes={attributes} listeners={listeners} />
+                        </TD>
+                        <TD className="font-medium">{assessment.title}</TD>
+                        <TD>
+                          <Badge tone="neutral">{TYPE_LABEL[assessment.type]}</Badge>
+                        </TD>
+                        <TD>{assessment.total_marks}</TD>
+                        <TD>{assessment.weightage_percent}%</TD>
+                        <TD>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditing(assessment)
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={(e) => handleDelete(e, assessment)}>
+                              Delete
+                            </Button>
+                            <span className="text-brand-600 text-xs font-medium">Manage →</span>
+                          </div>
+                        </TD>
+                      </>
+                    )}
+                  </SortableRow>
+                ))}
+              </TBody>
+            </Table>
+          </SortableContext>
+        </DndContext>
       )}
 
       <AssessmentFormModal
@@ -154,6 +183,7 @@ function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessm
   const [totalMarks, setTotalMarks] = useState('10')
   const [weightagePercent, setWeightagePercent] = useState('10')
   const [date, setDate] = useState('')
+  const [durationMinutes, setDurationMinutes] = useState('')
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -164,6 +194,7 @@ function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessm
       setTotalMarks(assessment ? String(assessment.total_marks) : '10')
       setWeightagePercent(assessment ? String(assessment.weightage_percent) : '10')
       setDate(assessment?.date ?? '')
+      setDurationMinutes(assessment?.duration_minutes ? String(assessment.duration_minutes) : '')
       setError('')
     }
   }, [isOpen, assessment])
@@ -171,6 +202,10 @@ function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessm
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
+    if (Number(totalMarks) <= 0) {
+      setError('Total marks must be greater than 0.')
+      return
+    }
     setIsSubmitting(true)
     try {
       const data = {
@@ -179,6 +214,7 @@ function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessm
         total_marks: Number(totalMarks),
         weightage_percent: Number(weightagePercent),
         date: date || undefined,
+        duration_minutes: durationMinutes ? Number(durationMinutes) : null,
       }
       if (mode === 'edit') {
         await updateAssessment(assessment.id, data)
@@ -215,7 +251,8 @@ function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessm
           <Input
             label="Total Marks"
             type="number"
-            min="0"
+            min="0.01"
+            step="0.01"
             value={totalMarks}
             onChange={(e) => setTotalMarks(e.target.value)}
             required
@@ -230,7 +267,18 @@ function AssessmentFormModal({ isOpen, onClose, onSaved, courseId, mode, assessm
             required
           />
         </div>
-        <Input label="Date (optional)" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Input label="Date (optional)" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            label="Allocated Time (minutes, optional)"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="e.g. 90"
+            value={durationMinutes}
+            onChange={(e) => setDurationMinutes(e.target.value)}
+          />
+        </div>
         {error && <p className="text-sm text-danger-600 bg-danger-50 rounded-lg px-3 py-2">{error}</p>}
         <ModalFooter>
           <Button type="button" variant="secondary" onClick={onClose}>

@@ -50,6 +50,10 @@ export default function RiskPanel({ courseId }) {
   const [isLoading, setIsLoading] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [error, setError] = useState('')
+  // GET (stored) never carries `skipped` -- only a fresh POST run tells us who
+  // was excluded and why, so the "why nothing predicted" message is only
+  // accurate once this is true.
+  const [hasRunOnce, setHasRunOnce] = useState(false)
 
   useEffect(() => {
     if (!courseId) return
@@ -75,6 +79,7 @@ export default function RiskPanel({ courseId }) {
     try {
       const fresh = await predictRisk(courseId)
       setReport({ ...fresh, skipped: fresh.skipped ?? [] })
+      setHasRunOnce(true)
     } catch (err) {
       setError(err?.detail || 'Prediction failed.')
     } finally {
@@ -85,6 +90,28 @@ export default function RiskPanel({ courseId }) {
   const predictions = report?.predictions ?? []
   const skipped = report?.skipped ?? []
   const gaps = report?.learning_gaps ?? []
+
+  const skippedNote = skipped.length > 0 && (
+    <p className="text-xs text-ink-500">
+      {skipped.length} student{skipped.length > 1 ? 's' : ''} skipped (fewer than 5 scored
+      assessments).
+    </p>
+  )
+
+  const gapsSection = gaps.length > 0 && (
+    <div>
+      <h4 className="text-sm font-semibold text-ink-900 mb-2">
+        Learning gaps — CLOs below threshold
+      </h4>
+      <div className="flex flex-wrap gap-2">
+        {gaps.map((gap) => (
+          <Badge key={gap.clo_id} tone="warning">
+            {gap.code}: {gap.class_average.toFixed(0)}% &lt; {gap.threshold.toFixed(0)}%
+          </Badge>
+        ))}
+      </div>
+    </div>
+  )
 
   return (
     <Card>
@@ -107,10 +134,20 @@ export default function RiskPanel({ courseId }) {
             <Spinner />
           </div>
         ) : predictions.length === 0 ? (
-          <EmptyState
-            title="No predictions yet"
-            description="Run a prediction to classify each student's risk. Students need at least 5 scored assessments; enter attendance on the course page first for the best signal."
-          />
+          <div className="flex flex-col gap-4">
+            <EmptyState
+              title={hasRunOnce ? "No students could be scored" : "No predictions yet"}
+              description={
+                hasRunOnce && skipped.length > 0
+                  ? `${skipped.length} enrolled student${skipped.length > 1 ? 's have' : ' has'} fewer than 5 scored assessments, so risk can't be predicted yet. Enter more scores (and attendance) on the course page, then run the prediction again.`
+                  : hasRunOnce
+                    ? "No enrolled students have any scored assessments yet. Enter scores on the course page, then run the prediction again."
+                    : "Run a prediction to classify each student's risk. Students need at least 5 scored assessments; enter attendance on the course page first for the best signal."
+              }
+            />
+            {skippedNote}
+            {gapsSection}
+          </div>
         ) : (
           <div className="flex flex-col gap-5">
             <Table>
@@ -149,27 +186,8 @@ export default function RiskPanel({ courseId }) {
               </TBody>
             </Table>
 
-            {skipped.length > 0 && (
-              <p className="text-xs text-ink-500">
-                {skipped.length} student{skipped.length > 1 ? 's' : ''} skipped (fewer than 5
-                scored assessments).
-              </p>
-            )}
-
-            {gaps.length > 0 && (
-              <div>
-                <h4 className="text-sm font-semibold text-ink-900 mb-2">
-                  Learning gaps — CLOs below threshold
-                </h4>
-                <div className="flex flex-wrap gap-2">
-                  {gaps.map((gap) => (
-                    <Badge key={gap.clo_id} tone="warning">
-                      {gap.code}: {gap.class_average.toFixed(0)}% &lt; {gap.threshold.toFixed(0)}%
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
+            {skippedNote}
+            {gapsSection}
           </div>
         )}
       </CardBody>

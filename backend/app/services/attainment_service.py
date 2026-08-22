@@ -170,6 +170,15 @@ async def build_course_report(db: AsyncSession, course_id: int) -> CourseAttainm
     for record in records:
         by_clo[record.clo_id].append(record)
 
+    # A CLO with no tagged questions still gets a zero-filled attainment_record
+    # per student (section 8's zero-division guard), which reads identically to
+    # "students are failing this CLO". Only let CLOs that have actually been
+    # assessed pull a PLO's attainment toward that number -- otherwise a PLO
+    # whose CLOs simply haven't been assessed yet (e.g. before the Final Exam)
+    # looks falsely under-attained instead of just "not yet measured".
+    questions = await _course_questions(db, course_id)
+    assessed_clo_ids = {question.clo_id for question in questions if question.clo_id is not None}
+
     clo_summaries: list[CLOAttainmentSummary] = []
     clo_averages: dict[int, float] = {}
 
@@ -184,6 +193,7 @@ async def build_course_report(db: AsyncSession, course_id: int) -> CourseAttainm
                 clo_id=clo.id,
                 code=clo.code,
                 title=clo.title,
+                bloom_level=clo.bloom_level,
                 class_average=average,
                 is_achieved=any(record.is_achieved for record in clo_records),
                 student_count=len(clo_records),
@@ -194,6 +204,8 @@ async def build_course_report(db: AsyncSession, course_id: int) -> CourseAttainm
 
     contributions: dict[int, list[tuple[float, int]]] = defaultdict(list)
     for mapping in mappings:
+        if mapping.clo_id not in assessed_clo_ids:
+            continue
         contributions[mapping.plo_id].append(
             (clo_averages.get(mapping.clo_id, 0.0), mapping.strength)
         )

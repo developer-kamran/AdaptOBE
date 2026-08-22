@@ -60,6 +60,7 @@ async def create_assessment(db: AsyncSession, data: AssessmentCreate, user: User
         total_marks=data.total_marks,
         weightage_percent=data.weightage_percent,
         date=data.date,
+        duration_minutes=data.duration_minutes,
     )
     db.add(assessment)
     await db.commit()

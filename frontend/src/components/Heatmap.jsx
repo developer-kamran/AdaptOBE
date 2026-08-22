@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Badge from './ui/Badge'
 
 const STRENGTH_STYLE = {
@@ -10,6 +12,53 @@ const STRENGTH_LABEL = { 1: 'Weak', 2: 'Moderate', 3: 'Strong' }
 
 function averageTone(value, threshold) {
   return value >= threshold ? 'success' : 'danger'
+}
+
+// Hover tooltip (no click needed) for the CLO/PLO code labels -- distinct
+// from InfoTooltip, which is click-to-open for optional supplementary detail
+// elsewhere. Portal'd to <body> and positioned from the trigger's own
+// bounding rect, because the row labels live inside `sticky` table cells:
+// each sticky cell is its own stacking context, so a same-DOM-subtree
+// absolutely-positioned tooltip can get painted *behind* the next sticky row
+// no matter how high its z-index goes. Escaping to the body sidesteps that
+// entirely.
+function HoverLabel({ label, tooltip, align = 'center' }) {
+  const triggerRef = useRef(null)
+  const [pos, setPos] = useState(null)
+
+  function show() {
+    const rect = triggerRef.current?.getBoundingClientRect()
+    if (!rect) return
+    setPos({ top: rect.bottom + 6, left: align === 'left' ? rect.left : rect.left + rect.width / 2 })
+  }
+
+  return (
+    <span
+      ref={triggerRef}
+      className="inline-block cursor-default"
+      onMouseEnter={show}
+      onMouseLeave={() => setPos(null)}
+    >
+      {label}
+      {pos &&
+        createPortal(
+          <div
+            role="tooltip"
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              transform: align === 'left' ? 'none' : 'translateX(-50%)',
+            }}
+            className="z-50 w-max max-w-[16rem] rounded-lg bg-ink-900 text-white text-xs leading-relaxed
+              px-3 py-2 shadow-[var(--shadow-elevation-3)] pointer-events-none"
+          >
+            {tooltip}
+          </div>,
+          document.body
+        )}
+    </span>
+  )
 }
 
 /**
@@ -44,10 +93,9 @@ export default function Heatmap({ report }) {
             {plos.map((plo) => (
               <th
                 key={plo.plo_id}
-                title={plo.title}
                 className="px-3 py-2 border-b border-border text-center font-medium text-ink-700 whitespace-nowrap min-w-[84px]"
               >
-                {plo.code}
+                <HoverLabel label={plo.code} tooltip={plo.title} />
               </th>
             ))}
             <th className="px-3 py-2 border-b border-l border-border text-center font-medium text-ink-500 text-xs uppercase tracking-wide whitespace-nowrap">
@@ -58,11 +106,12 @@ export default function Heatmap({ report }) {
         <tbody>
           {clos.map((clo) => (
             <tr key={clo.clo_id}>
-              <th
-                title={clo.title}
-                className="sticky left-0 bg-surface-raised text-left font-medium text-ink-900 px-3 py-2 border-r border-b border-border whitespace-nowrap"
-              >
-                {clo.code}
+              <th className="sticky left-0 bg-surface-raised text-left font-medium text-ink-900 px-3 py-2 border-r border-b border-border whitespace-nowrap">
+                <HoverLabel
+                  label={clo.code}
+                  tooltip={clo.bloom_level ? `${clo.title} — ${clo.bloom_level}` : clo.title}
+                  align="left"
+                />
               </th>
               {plos.map((plo) => {
                 const strength = strengthByPair.get(`${clo.clo_id}:${plo.plo_id}`)
@@ -73,7 +122,7 @@ export default function Heatmap({ report }) {
                         title={`${STRENGTH_LABEL[strength]} (${strength})`}
                         className={`h-8 w-full rounded-md flex items-center justify-center font-semibold text-xs ${STRENGTH_STYLE[strength]}`}
                       >
-                        {strength}
+                        {STRENGTH_LABEL[strength]}
                       </div>
                     ) : (
                       <div className="h-8 w-full rounded-md flex items-center justify-center text-ink-400 text-xs bg-slate-50">

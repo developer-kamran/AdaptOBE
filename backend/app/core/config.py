@@ -20,6 +20,11 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173"
 
+    # Groq API key for AI-generated CLO wording (app/ml/clo_generator.py).
+    # Optional so app boot / test collection never requires a real key --
+    # the generation endpoint fails clearly at call time if it's unset.
+    groq_api_key: str | None = None
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

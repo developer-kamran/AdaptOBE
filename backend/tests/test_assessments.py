@@ -62,6 +62,46 @@ async def test_create_assessment_success(client, faculty, course):
     assert body["weightage_percent"] == 30
 
 
+async def test_create_assessment_rejects_zero_total_marks(client, faculty, course):
+    resp = await client.post(
+        "/api/v1/assessments",
+        json={
+            "course_id": course.id,
+            "title": "Zero Marks Quiz",
+            "type": "quiz",
+            "total_marks": 0,
+            "weightage_percent": 10,
+        },
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 422
+
+
+async def test_create_assessment_accepts_small_positive_total_marks(client, faculty, course):
+    resp = await client.post(
+        "/api/v1/assessments",
+        json={
+            "course_id": course.id,
+            "title": "Tiny Marks Quiz",
+            "type": "quiz",
+            "total_marks": 0.01,
+            "weightage_percent": 10,
+        },
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 201
+
+
+async def test_update_assessment_rejects_zero_total_marks(client, faculty, make_assessment):
+    assessment = await make_assessment(total_marks=10.0)
+    resp = await client.patch(
+        f"/api/v1/assessments/{assessment.id}",
+        json={"total_marks": 0},
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 422
+
+
 async def test_weightage_sum_capped_at_100(client, faculty, course):
     """Section 7: assessment creation validates that total weightage stays <= 100%."""
     for index, weight in enumerate([40, 40]):
@@ -282,6 +322,39 @@ async def test_question_marks_cannot_exceed_assessment_total(client, faculty, ma
     )
     assert resp.status_code == 422
     assert "exceeds" in resp.json()["detail"]
+
+
+async def test_question_marks_cannot_be_zero(client, faculty, make_assessment):
+    assessment = await make_assessment(total_marks=10.0)
+    resp = await client.post(
+        f"/api/v1/assessments/{assessment.id}/questions",
+        json={"question_number": 1, "marks": 0, "text": "Zero marks question."},
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 422
+
+
+async def test_bulk_question_marks_cannot_be_zero(client, faculty, make_assessment):
+    assessment = await make_assessment(total_marks=10.0)
+    resp = await client.post(
+        f"/api/v1/assessments/{assessment.id}/questions/bulk",
+        json={
+            "items": [
+                {
+                    "question_number": 1,
+                    "marks": 0,
+                    "text": "Zero marks MCQ.",
+                    "question_type": "mcq",
+                    "type_data": {
+                        "options": [{"label": "A", "text": "One"}, {"label": "B", "text": "Two"}],
+                        "correct_option": "A",
+                    },
+                }
+            ]
+        },
+        headers=auth_header(faculty),
+    )
+    assert resp.status_code == 422
 
 
 async def test_question_text_is_required(client, faculty, make_assessment):

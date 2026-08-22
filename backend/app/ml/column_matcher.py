@@ -78,7 +78,38 @@ ENROLLMENT_ALIASES: dict[str, str] = {
     "status": "eligible",
 }
 
-_prompt_embeddings_cache: dict[int, dict[str, list[float]]] = {}
+#: Field prompts/aliases for the attendance-sheet import, which asks for
+#: "Attendance %" instead of "Email" -- see `attendance_import_service.py`.
+ATTENDANCE_FIELD_PROMPTS: dict[str, str] = {
+    "full_name": FIELD_PROMPTS["full_name"],
+    "father_name": FIELD_PROMPTS["father_name"],
+    "seat_no": FIELD_PROMPTS["seat_no"],
+    "attendance_percentage": "attendance percentage, attendance %, percent present",
+}
+
+ATTENDANCE_ALIASES: dict[str, str] = {
+    **{k: v for k, v in _ALIASES.items() if v in ATTENDANCE_FIELD_PROMPTS},
+    "attendance": "attendance_percentage",
+    "attendancepercent": "attendance_percentage",
+    "attendancepercentage": "attendance_percentage",
+    "attendancepct": "attendance_percentage",
+    "percentattendance": "attendance_percentage",
+}
+
+#: Identity-field prompts/aliases for the score-sheet import -- only name/seat
+#: no are needed there (question-mark columns are matched separately by
+#: `match_question_columns`, not through this embedding path -- see its
+#: docstring for why). Derived from the same base sets as `ENROLLMENT_*` above.
+SCORE_IMPORT_FIELD_PROMPTS: dict[str, str] = {
+    "full_name": FIELD_PROMPTS["full_name"],
+    "seat_no": FIELD_PROMPTS["seat_no"],
+}
+
+SCORE_IMPORT_ALIASES: dict[str, str] = {
+    k: v for k, v in _ALIASES.items() if v in SCORE_IMPORT_FIELD_PROMPTS
+}
+
+_prompt_embeddings_cache: dict[tuple, dict[str, list[float]]] = {}
 
 
 def normalize_header(header: str) -> str:
@@ -92,10 +123,12 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def _encode_prompts(field_prompts: dict[str, str]) -> dict[str, list[float]]:
-    """Encode a set of field prompts once per process; they never change.
-    Cached per prompt-set (by its id) so both the student-import field set
-    and the enrollment-import field set only get encoded once each."""
-    cache_key = id(field_prompts)
+    """Encode a set of field prompts once per process; they never change for a
+    given content. Cached by *content*, not `id(field_prompts)` -- a dict's id
+    can be reused by Python after garbage collection, which would silently
+    serve a stale/wrong cached embedding for a short-lived dict built fresh
+    per request (as the score-import column matching does)."""
+    cache_key = tuple(sorted(field_prompts.items()))
     if cache_key not in _prompt_embeddings_cache:
         _prompt_embeddings_cache[cache_key] = {
             field: embeddings.encode_text(prompt) for field, prompt in field_prompts.items()
@@ -142,6 +175,74 @@ def _match_columns_sync(
             taken_columns.add(index)
 
     return {field: assigned.get(field) for field in field_prompts}
+
+
+def _question_number_aliases(question_number: int) -> set[str]:
+    n = str(question_number)
+    return {f"q{n}", f"question{n}", f"que{n}", f"marksq{n}", f"q{n}marks", f"qno{n}", f"qn{n}"}
+
+
+class MatchedColumn:
+    """One question's resolved scoresheet column, plus how it was resolved --
+    `matched_by="position"` matches are shown to faculty for visual double-
+    checking before they confirm, since a positional guess is weaker evidence
+    than an explicit "Q3"-style header."""
+
+    __slots__ = ("index", "matched_by")
+
+    def __init__(self, index: int | None, matched_by: str | None):
+        self.index = index
+        self.matched_by = matched_by
+
+
+def match_question_columns(
+    headers: list[str], questions: list, excluded_columns: set[int] = frozenset()
+) -> dict[int, MatchedColumn]:
+    """Match a scoresheet's mark columns to specific questions.
+
+    Deliberately does NOT use the embedding-similarity fallback `match_columns`
+    relies on: "question 3" and "question 4" differ only by a number token
+    surrounded by otherwise-identical words, so MiniLM cosine similarity
+    between them is unreliable noise, unlike genuinely distinct field names
+    ("full name" vs "seat number"). Two stages instead:
+      1. Alias match: normalized header against generated aliases per question
+         number ("q1", "question1", "marksq1", ...).
+      2. Positional fallback: whatever's left is assigned left-to-right by
+         ascending question number, but only when the count of leftover
+         columns equals the count of leftover questions -- exam mark sheets
+         are almost always laid out in question order, but this only fires
+         when that count match makes the guess unambiguous.
+
+    `excluded_columns` should be the column indices already claimed by
+    identity fields (name/seat_no/etc, matched separately via `match_columns`)
+    so they're never miscounted as leftover question columns.
+    """
+    sorted_questions = sorted(questions, key=lambda q: q.question_number)
+    assigned: dict[int, MatchedColumn] = {}
+    used_columns: set[int] = set(excluded_columns)
+
+    for question in sorted_questions:
+        aliases = _question_number_aliases(question.question_number)
+        for index, header in enumerate(headers):
+            if index in used_columns:
+                continue
+            if normalize_header(header) in aliases:
+                assigned[question.id] = MatchedColumn(index, "alias")
+                used_columns.add(index)
+                break
+
+    unmatched_questions = [q for q in sorted_questions if q.id not in assigned]
+    unmatched_columns = [
+        i for i, header in enumerate(headers) if i not in used_columns and header.strip()
+    ]
+    if unmatched_questions and len(unmatched_questions) == len(unmatched_columns):
+        for question, index in zip(unmatched_questions, unmatched_columns):
+            assigned[question.id] = MatchedColumn(index, "position")
+
+    return {
+        question.id: assigned.get(question.id, MatchedColumn(None, None))
+        for question in questions
+    }
 
 
 async def match_columns(

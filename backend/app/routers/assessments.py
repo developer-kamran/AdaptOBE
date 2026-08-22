@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -14,16 +14,24 @@ from app.schemas.question import (
     TagSuggestRequest,
     TagSuggestResponse,
 )
+from app.schemas.assessment_paper_import import AssessmentPaperPreview
 from app.schemas.score import BulkScoreRequest, BulkScoreResponse, ScoreRead
+from app.schemas.score_import import ConfirmScoreImportRequest, ScoreImportPreview
 from app.services import (
+    assessment_export_service,
+    assessment_paper_import_service,
     assessment_service,
     attainment_service,
+    clo_service,
     course_service,
+    file_parsers,
     question_service,
+    score_import_service,
     score_service,
 )
 from app.services.exceptions import (
     ConflictError,
+    LLMGenerationError,
     NotFoundError,
     PermissionDeniedError,
     ValidationError,
@@ -34,6 +42,14 @@ router = APIRouter(prefix="/api/v1/assessments", tags=["assessments"])
 # Assessments/scoring is a faculty-operational concern -- neither admin tier
 # touches it, per the admin-hierarchy redesign.
 FacultyOnly = Depends(require_roles(UserRole.faculty))
+
+#: Score sheets are small. Mirrors enrollments.py's import upload cap.
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+#: Assessment papers are real documents (can include headers/images inside
+#: an otherwise-text PDF/Word file), so this gets a larger cap than the
+#: tabular score-sheet upload above.
+MAX_PAPER_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
 def _translate(exc: Exception) -> HTTPException:
@@ -264,3 +280,160 @@ async def bulk_enter_scores(
         raise _translate(exc) from exc
 
     return BulkScoreResponse(saved=saved, recalculated_students=recalculated)
+
+
+async def _exam_export_context(db: AsyncSession, assessment_id: int, current_user: User):
+    assessment = await assessment_service.get_assessment_for_user(db, assessment_id, current_user)
+    course = await course_service.get_course(db, assessment.course_id)
+    instructor = await db.get(User, course.owner_faculty_id)
+    questions = await question_service.list_questions(db, assessment_id)
+    return course, assessment, instructor.full_name if instructor else "—", questions
+
+
+@router.get("/{assessment_id}/export/pdf")
+async def export_assessment_pdf(
+    assessment_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOnly,
+):
+    try:
+        course, assessment, instructor_name, questions = await _exam_export_context(
+            db, assessment_id, current_user
+        )
+    except (NotFoundError, PermissionDeniedError) as exc:
+        raise _translate(exc) from exc
+
+    pdf_bytes = assessment_export_service.build_exam_pdf(course, assessment, instructor_name, questions)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        # `inline`, not `attachment` -- the frontend renders this in a preview
+        # iframe; the reader can still save it from there.
+        headers={"Content-Disposition": f'inline; filename="{assessment.title}.pdf"'},
+    )
+
+
+@router.get("/{assessment_id}/export/docx")
+async def export_assessment_docx(
+    assessment_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOnly,
+):
+    try:
+        course, assessment, instructor_name, questions = await _exam_export_context(
+            db, assessment_id, current_user
+        )
+    except (NotFoundError, PermissionDeniedError) as exc:
+        raise _translate(exc) from exc
+
+    docx_bytes = assessment_export_service.build_exam_docx(course, assessment, instructor_name, questions)
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{assessment.title}.docx"'},
+    )
+
+
+@router.post("/{assessment_id}/scores/import/preview", response_model=ScoreImportPreview)
+async def preview_score_import(
+    assessment_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOnly,
+):
+    """Parse an uploaded score sheet and classify each row. Saves nothing."""
+    try:
+        assessment = await assessment_service.get_assessment_for_user(db, assessment_id, current_user)
+    except (NotFoundError, PermissionDeniedError) as exc:
+        raise _translate(exc) from exc
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(file_parsers.SUPPORTED_EXTENSIONS):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unsupported file type. Upload one of: {', '.join(file_parsers.SUPPORTED_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File is too large (limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+        )
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="The file is empty")
+
+    try:
+        return await score_import_service.build_preview(db, assessment, content, filename)
+    except file_parsers.FileParseError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+
+
+@router.post(
+    "/{assessment_id}/scores/import/confirm",
+    response_model=BulkScoreResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def confirm_score_import(
+    assessment_id: int,
+    data: ConfirmScoreImportRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOnly,
+):
+    """Delegates to the same `bulk_enter_scores` the manual Score Entry grid
+    uses -- no parallel write path, same validation applies at commit time."""
+    try:
+        saved, recalculated = await score_service.bulk_enter_scores(
+            db, assessment_id, BulkScoreRequest(scores=data.scores), current_user
+        )
+    except (NotFoundError, PermissionDeniedError, ValidationError) as exc:
+        raise _translate(exc) from exc
+
+    return BulkScoreResponse(saved=saved, recalculated_students=recalculated)
+
+
+@router.post("/{assessment_id}/paper-import/preview", response_model=AssessmentPaperPreview)
+async def preview_paper_import(
+    assessment_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = FacultyOnly,
+):
+    """Extract questions (and header metadata for verification) from an
+    uploaded assessment paper (the "Upload Assessment Paper" feature).
+    Writes nothing -- the faculty reviews the extracted questions and
+    imports the ones they approve via the existing bulk question-create
+    endpoint, exactly like the manual bulk-add flow."""
+    try:
+        assessment = await assessment_service.get_assessment_for_user(db, assessment_id, current_user)
+        course = await course_service.get_course(db, assessment.course_id)
+    except (NotFoundError, PermissionDeniedError) as exc:
+        raise _translate(exc) from exc
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(file_parsers.DOCUMENT_EXTENSIONS):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unsupported file type. Upload one of: {', '.join(file_parsers.DOCUMENT_EXTENSIONS)}",
+        )
+
+    content = await file.read()
+    if len(content) > MAX_PAPER_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File is too large (limit {MAX_PAPER_UPLOAD_BYTES // (1024 * 1024)} MB)",
+        )
+    if not content:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="The file is empty")
+
+    instructor = await db.get(User, course.owner_faculty_id)
+    clos = await clo_service.list_clos(db, course.id)
+
+    try:
+        return await assessment_paper_import_service.build_preview(
+            course, assessment, instructor, clos, content, filename
+        )
+    except file_parsers.FileParseError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except LLMGenerationError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc

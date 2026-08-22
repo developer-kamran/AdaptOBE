@@ -12,3 +12,7 @@ class PermissionDeniedError(Exception):
 
 class ValidationError(Exception):
     """Raised when a request is well-formed but semantically invalid."""
+
+
+class LLMGenerationError(Exception):
+    """Raised when an external LLM call fails or returns unusable output."""

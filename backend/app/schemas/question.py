@@ -13,7 +13,7 @@ from app.models.question import QuestionType
 
 class QuestionCreate(BaseModel):
     question_number: int = Field(gt=0)
-    marks: float = Field(ge=0)
+    marks: float = Field(gt=0)
     clo_id: int | None = None
     text: str = Field(min_length=1)
     question_type: QuestionType = QuestionType.question
@@ -22,7 +22,7 @@ class QuestionCreate(BaseModel):
 
 class QuestionUpdate(BaseModel):
     question_number: int | None = Field(default=None, gt=0)
-    marks: float | None = Field(default=None, ge=0)
+    marks: float | None = Field(default=None, gt=0)
     clo_id: int | None = None
     text: str | None = Field(default=None, min_length=1)
     question_type: QuestionType | None = None

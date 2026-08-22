@@ -80,6 +80,10 @@ export default function QuestionFormModal({
       setError(`Question number ${questionNumber} already exists in this assessment.`)
       return
     }
+    if (Number(marks) <= 0) {
+      setError('Marks must be greater than 0.')
+      return
+    }
     if (remainingMarks != null && Number(marks) > remainingMarks) {
       setError(`Marks would exceed the assessment's total by ${(Number(marks) - remainingMarks).toFixed(2)}.`)
       return
@@ -132,7 +136,8 @@ export default function QuestionFormModal({
           <Input
             label="Marks"
             type="number"
-            min="0"
+            min="0.01"
+            step="0.01"
             value={marks}
             onChange={(e) => setMarks(e.target.value)}
             required

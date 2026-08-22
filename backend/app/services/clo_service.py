@@ -1,12 +1,14 @@
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ml import embeddings
+from app.ml import clo_generator, embeddings
 from app.models.clo import CLO
+from app.models.plo import PLO
 from app.models.user import User
 from app.schemas.clo import CLOCreate, CLOUpdate
+from app.schemas.clo_generation import GenerateCloRequest, GenerateCloResponse
 from app.services import attainment_service, course_service
-from app.services.exceptions import NotFoundError
+from app.services.exceptions import NotFoundError, ValidationError
 
 
 def build_embedding_source(title: str, description: str) -> str:
@@ -44,6 +46,42 @@ async def create_clo(db: AsyncSession, course_id: int, data: CLOCreate, user: Us
     await db.commit()
     await db.refresh(clo)
     return clo
+
+
+async def generate_clo_suggestion(
+    db: AsyncSession, course_id: int, data: GenerateCloRequest, user: User
+) -> GenerateCloResponse:
+    """Ask the AI for a CLO suggestion (title/description/bloom level). Writes
+    nothing -- the faculty must explicitly call `create_clo` to actually save it,
+    same as every other AI-suggestion flow in this codebase (mapping/tagging)."""
+    course = await course_service.get_course_for_user(db, course_id, user)
+
+    plos = list(
+        (
+            await db.execute(select(PLO).where(PLO.id.in_(data.target_plo_ids)))
+        )
+        .scalars()
+        .all()
+    )
+    found_ids = {plo.id for plo in plos}
+    missing = set(data.target_plo_ids) - found_ids
+    if missing:
+        raise NotFoundError(f"PLO(s) not found: {sorted(missing)}")
+    wrong_program = [plo.code for plo in plos if plo.program_id != course.program_id]
+    if wrong_program:
+        raise ValidationError(
+            f"These PLOs do not belong to this course's programme: {', '.join(wrong_program)}"
+        )
+
+    plo_texts = [f"{plo.code} ({plo.title}): {plo.description}" for plo in plos]
+    suggestion = await clo_generator.agenerate_clo_suggestion(
+        data.topic, data.requirements, plo_texts
+    )
+    return GenerateCloResponse(
+        title=suggestion.title,
+        description=suggestion.description,
+        bloom_level=suggestion.bloom_level,
+    )
 
 
 async def update_clo(db: AsyncSession, clo_id: int, data: CLOUpdate, user: User) -> CLO:

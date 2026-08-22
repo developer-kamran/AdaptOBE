@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
-import { createQuestionsBulk } from '../../api/assessments'
+import { createQuestionsBulk, suggestQuestionTag } from '../../api/assessments'
 import { ApiError } from '../../api/client'
+import { similarityLabel } from '../../utils/similarity'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
 import Select from '../../components/ui/Select'
 import Modal, { ModalFooter } from '../../components/ui/Modal'
+import Badge from '../../components/ui/Badge'
+import InfoTooltip from '../../components/ui/InfoTooltip'
 import TypeFieldsEditor from './TypeFieldsEditor'
 import { QUESTION_TYPE_LABEL, emptyTypeData } from './questionTypes'
 
@@ -23,6 +26,8 @@ export default function BulkQuestionModal({
   existingNumbers,
 }) {
   const [items, setItems] = useState([])
+  const [suggestions, setSuggestions] = useState([]) // suggestions[index] -> array | null
+  const [suggestingIndex, setSuggestingIndex] = useState(null)
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
 
@@ -37,11 +42,26 @@ export default function BulkQuestionModal({
         type_data: emptyTypeData(type),
       })),
     )
+    setSuggestions(Array.from({ length: quantity }, () => null))
     setError('')
   }, [isOpen, quantity, nextNumber, type])
 
   function updateItem(index, patch) {
     setItems((current) => current.map((item, i) => (i === index ? { ...item, ...patch } : item)))
+  }
+
+  async function handleSuggest(index) {
+    const text = items[index]?.text
+    if (!text?.trim()) return
+    setSuggestingIndex(index)
+    try {
+      const result = await suggestQuestionTag(assessmentId, text)
+      setSuggestions((current) => current.map((s, i) => (i === index ? result.suggestions : s)))
+    } catch {
+      setSuggestions((current) => current.map((s, i) => (i === index ? [] : s)))
+    } finally {
+      setSuggestingIndex(null)
+    }
   }
 
   async function handleSubmit(e) {
@@ -56,6 +76,10 @@ export default function BulkQuestionModal({
     }
     if (existingNumbers && numbers.some((n) => existingNumbers.has(n))) {
       setError('One of these question numbers already exists in this assessment.')
+      return
+    }
+    if (items.some((i) => Number(i.marks) <= 0)) {
+      setError('Every item must have marks greater than 0.')
       return
     }
     const totalMarks = items.reduce((sum, i) => sum + Number(i.marks || 0), 0)
@@ -113,7 +137,8 @@ export default function BulkQuestionModal({
                 <Input
                   label="Marks"
                   type="number"
-                  min="0"
+                  min="0.01"
+                  step="0.01"
                   value={item.marks}
                   onChange={(e) => updateItem(index, { marks: e.target.value })}
                   required
@@ -127,8 +152,20 @@ export default function BulkQuestionModal({
                 onTypeDataChange={(type_data) => updateItem(index, { type_data })}
               />
               <div className="mt-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-medium text-ink-700">CLO Tag</label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleSuggest(index)}
+                    isLoading={suggestingIndex === index}
+                    disabled={!item.text?.trim()}
+                  >
+                    Suggest with AI
+                  </Button>
+                </div>
                 <Select
-                  label="CLO Tag"
                   value={item.clo_id}
                   onChange={(e) => updateItem(index, { clo_id: e.target.value })}
                   required
@@ -140,6 +177,34 @@ export default function BulkQuestionModal({
                     </option>
                   ))}
                 </Select>
+
+                {suggestions[index] && suggestions[index].length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    {suggestions[index].map((s) => {
+                      const { label, tone } = similarityLabel(s.similarity_score)
+                      const isSelected = item.clo_id === String(s.clo_id)
+                      return (
+                        <button
+                          key={s.clo_id}
+                          type="button"
+                          onClick={() => updateItem(index, { clo_id: String(s.clo_id) })}
+                          className={`text-xs rounded-full px-2.5 py-1 border transition-colors
+                            ${
+                              isSelected
+                                ? 'bg-brand-600 text-white border-brand-600'
+                                : 'bg-white text-ink-700 border-border-strong hover:border-brand-400'
+                            }`}
+                        >
+                          {s.code} · <Badge tone={isSelected ? 'neutral' : tone}>{label}</Badge>
+                        </button>
+                      )
+                    })}
+                    <InfoTooltip>
+                      AI compared this question's wording with each CLO using semantic similarity,
+                      then labels the match Strong, Moderate, or Weak based on that score.
+                    </InfoTooltip>
+                  </div>
+                )}
               </div>
             </div>
           ))}

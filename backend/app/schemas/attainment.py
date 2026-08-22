@@ -5,6 +5,7 @@ class CLOAttainmentSummary(BaseModel):
     clo_id: int
     code: str
     title: str
+    bloom_level: str | None
     class_average: float
     is_achieved: bool
     student_count: int

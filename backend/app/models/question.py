@@ -19,7 +19,7 @@ class QuestionType(str, enum.Enum):
 class Question(Base):
     __tablename__ = "questions"
     __table_args__ = (
-        CheckConstraint("marks >= 0", name="ck_question_marks"),
+        CheckConstraint("marks > 0", name="ck_question_marks"),
         # A question number identifies a question within its own assessment
         # only -- two different assessments may both have a "Q1".
         UniqueConstraint(

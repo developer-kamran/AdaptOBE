@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, downloadExport, fetchExportBlob } from './client'
 
 export const listAssessments = (courseId) =>
   apiFetch(`/api/v1/assessments?course_id=${courseId}`)
@@ -47,3 +47,36 @@ export const submitScores = (assessmentId, scores) =>
     method: 'POST',
     body: { scores },
   })
+
+// Export
+export const previewAssessmentExportPdf = (assessmentId) =>
+  fetchExportBlob(`/api/v1/assessments/${assessmentId}/export/pdf`, 'assessment.pdf')
+
+export const downloadAssessmentExportDocx = (assessmentId) =>
+  downloadExport(`/api/v1/assessments/${assessmentId}/export/docx`, 'assessment.docx')
+
+// Score upload
+export const previewScoreImport = (assessmentId, file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiFetch(`/api/v1/assessments/${assessmentId}/scores/import/preview`, {
+    method: 'POST',
+    body: formData,
+  })
+}
+
+export const confirmScoreImport = (assessmentId, scores) =>
+  apiFetch(`/api/v1/assessments/${assessmentId}/scores/import/confirm`, {
+    method: 'POST',
+    body: { scores },
+  })
+
+// Assessment paper upload -> extracted questions
+export const previewPaperImport = (assessmentId, file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return apiFetch(`/api/v1/assessments/${assessmentId}/paper-import/preview`, {
+    method: 'POST',
+    body: formData,
+  })
+}

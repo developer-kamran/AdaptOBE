@@ -121,3 +121,36 @@ export async function apiFetch(path, { method = 'GET', body, skipAuth = false, r
 export function apiBaseUrl() {
   return BASE_URL
 }
+
+function filenameFromDisposition(response, fallback) {
+  const disposition = response.headers.get('Content-Disposition') || ''
+  const match = disposition.match(/filename="([^"]+)"/)
+  return match ? match[1] : fallback
+}
+
+/** Fetch a file endpoint's bytes without triggering a browser download --
+ * for previewing (e.g. a PDF in an iframe) before the user chooses to save it. */
+export async function fetchExportBlob(path, filenameFallback) {
+  const response = await apiFetch(path, { raw: true })
+  const blob = await response.blob()
+  return { blob, filename: filenameFromDisposition(response, filenameFallback) }
+}
+
+/** Fetch a file endpoint and immediately trigger a browser download. */
+export async function downloadExport(path, filenameFallback) {
+  const { blob, filename } = await fetchExportBlob(path, filenameFallback)
+  downloadBlob(blob, filename)
+}
+
+/** Trigger a browser download for an already-fetched blob, without a second
+ * network request -- used when a preview's blob should also be downloadable. */
+export function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}

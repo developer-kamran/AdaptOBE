@@ -56,12 +56,14 @@ export default function BacklogEnrollModal({ isOpen, onClose, onEnrolled, course
 
   const trimmed = query.trim().toLowerCase()
   const matches = trimmed
-    ? candidates.filter(
-        (s) =>
-          !alreadyEnrolled.has(s.id) &&
-          ((s.seat_no ?? '').toLowerCase().includes(trimmed) ||
-            (s.enrollment_no ?? '').toLowerCase().includes(trimmed)),
-      )
+    ? candidates
+        .filter(
+          (s) =>
+            !alreadyEnrolled.has(s.id) &&
+            ((s.seat_no ?? '').toLowerCase().includes(trimmed) ||
+              (s.enrollment_no ?? '').toLowerCase().includes(trimmed)),
+        )
+        .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }))
     : []
 
   return (

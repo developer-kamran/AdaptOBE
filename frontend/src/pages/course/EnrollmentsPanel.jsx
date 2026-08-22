@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { enrollStudents, listEnrollments, listStudents, unenrollStudent } from '../../api/enrollments'
 import { ApiError } from '../../api/client'
 import Button from '../../components/ui/Button'
@@ -7,6 +7,8 @@ import Modal, { ModalFooter } from '../../components/ui/Modal'
 import Spinner from '../../components/ui/Spinner'
 import { Table, THead, TH, TBody, TR, TD } from '../../components/ui/Table'
 import EmptyState from '../../components/ui/EmptyState'
+import Badge from '../../components/ui/Badge'
+import { isBacklogStudent } from '../../utils/seatNo'
 import EnrollImportModal from './EnrollImportModal'
 import BacklogEnrollModal from './BacklogEnrollModal'
 
@@ -17,7 +19,6 @@ export default function EnrollmentsPanel({ course }) {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isImportOpen, setIsImportOpen] = useState(false)
   const [isBacklogOpen, setIsBacklogOpen] = useState(false)
-  const [highlightedIds, setHighlightedIds] = useState(new Set())
 
   const load = () => listEnrollments(course.id).then(setEnrollments)
   // Not scoped to course.program_id -- a backlog student can be enrolled
@@ -40,15 +41,34 @@ export default function EnrollmentsPanel({ course }) {
     load()
   }
 
-  function handleBacklogEnrolled(newStudentIds) {
-    setHighlightedIds(new Set(newStudentIds))
-    setSearch('') // clear any active filter so the newly-added rows are visible
+  function handleBacklogEnrolled() {
+    setSearch('') // clear any active filter so the newly-added row is visible
     load()
     loadStudentLookup()
   }
 
+  // Alphabetical by student name, not whatever order the enrollments API
+  // happens to return (roughly enrollment-id order) -- except backlog
+  // students (seat number encodes an earlier batch year than this course's
+  // semester currently expects, same computed check as AttendancePanel's)
+  // stay pinned at the bottom instead of sorting into alphabetical
+  // position, since they're repeating this course from an earlier cohort.
+  // Computed, not "just added this session", so it's consistent on every
+  // reload rather than only right after using "+ Add Backlog Student".
+  const nameSortedEnrollments = useMemo(() => {
+    const sorted = [...(enrollments ?? [])].sort((a, b) => {
+      const nameA = studentLookup.get(a.student_id)?.full_name ?? ''
+      const nameB = studentLookup.get(b.student_id)?.full_name ?? ''
+      return nameA.localeCompare(nameB, undefined, { sensitivity: 'base' })
+    })
+    const isBacklog = (e) => isBacklogStudent(studentLookup.get(e.student_id)?.seat_no, course.semester)
+    const regular = sorted.filter((e) => !isBacklog(e))
+    const backlog = sorted.filter(isBacklog)
+    return [...regular, ...backlog]
+  }, [enrollments, studentLookup, course.semester])
+
   const seatQuery = search.trim().toLowerCase()
-  const visibleEnrollments = (enrollments ?? []).filter((enrollment) => {
+  const visibleEnrollments = nameSortedEnrollments.filter((enrollment) => {
     if (!seatQuery) return true
     const seatNo = studentLookup.get(enrollment.student_id)?.seat_no ?? ''
     return seatNo.toLowerCase().includes(seatQuery)
@@ -72,12 +92,17 @@ export default function EnrollmentsPanel({ course }) {
       </div>
 
       {enrollments !== null && enrollments.length > 0 && (
-        <Input
-          placeholder="Search by Seat No…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs mb-4"
-        />
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+          <Input
+            placeholder="Search by Seat No…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full sm:max-w-xs"
+          />
+          <p className="text-sm text-ink-500 sm:ml-auto whitespace-nowrap">
+            {enrollments.length} student{enrollments.length === 1 ? '' : 's'} enrolled
+          </p>
+        </div>
       )}
 
       {enrollments === null ? (
@@ -101,13 +126,18 @@ export default function EnrollmentsPanel({ course }) {
           <TBody>
             {visibleEnrollments.map((enrollment) => {
               const student = studentLookup.get(enrollment.student_id)
-              const isHighlighted = highlightedIds.has(enrollment.student_id)
+              const backlog = isBacklogStudent(student?.seat_no, course.semester)
               return (
                 <TR
                   key={enrollment.id}
-                  className={isHighlighted ? 'bg-warning-50 ring-1 ring-inset ring-amber-200' : ''}
+                  className={backlog ? 'bg-warning-50 ring-1 ring-inset ring-amber-200' : ''}
                 >
-                  <TD className="font-medium">{student?.full_name ?? `#${enrollment.student_id}`}</TD>
+                  <TD className="font-medium">
+                    <span className="inline-flex items-center gap-1.5">
+                      {student?.full_name ?? `#${enrollment.student_id}`}
+                      {backlog && <Badge tone="warning">Backlog</Badge>}
+                    </span>
+                  </TD>
                   <TD className="text-ink-500">{student?.father_name ?? '—'}</TD>
                   <TD className="text-ink-500">{student?.seat_no ?? '—'}</TD>
                   <TD>
@@ -197,7 +227,9 @@ function EnrollModal({ isOpen, onClose, onEnrolled, course, alreadyEnrolled }) {
     }
   }
 
-  const available = students.filter((s) => !alreadyEnrolled.has(s.id))
+  const available = students
+    .filter((s) => !alreadyEnrolled.has(s.id))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name, undefined, { sensitivity: 'base' }))
   const seatQuery = search.trim().toLowerCase()
   const visible = available.filter(
     (s) => !seatQuery || (s.seat_no ?? '').toLowerCase().includes(seatQuery),
